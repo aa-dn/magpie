@@ -25,6 +25,31 @@ from reverse_image_search import (
     search_all_engines,
 )
 
+# ══════════════════════════════════════════════════════════════════════════════
+# BRANDING — edit these values to customise the tool's appearance
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Text
+BRAND_NAME     = "Image Intelligence"
+BRAND_SUBTITLE = "ISD · Reverse Image Search"
+HERO_HEADING   = 'Find where <span class="grad">any image</span><br>appears online'
+HERO_SUBTEXT   = "Paste a URL or upload a file to search across the web, then export a full visual report in CSV, Excel, or HTML."
+
+# Logo — leave blank to keep the default search icon,
+#         or paste a hosted image URL (e.g. from Imgur, your CDN, etc.)
+LOGO_URL = ""
+
+# Colours — paste hex codes from coolors.co
+COLOR_PRIMARY   = "#7c3aed"   # buttons, links, badges
+COLOR_SECONDARY = "#8b5cf6"   # hover states and lighter accents
+COLOR_GRADIENT  = "#a855f7"   # gradient endpoint (pairs with PRIMARY)
+
+# Font — from fonts.google.com: pick a font → Get embed code → paste the two values below
+FONT_NAME = "Inter"
+FONT_URL  = "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+
+# ══════════════════════════════════════════════════════════════════════════════
+
 SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
 TEMP_DIR = Path(tempfile.gettempdir()) / "ris_cache"
 TEMP_DIR.mkdir(exist_ok=True)
@@ -1049,3 +1074,44 @@ _HTML = """<!DOCTYPE html>
 </script>
 </body>
 </html>"""
+
+# ── Apply branding config ─────────────────────────────────────────────────────
+_logo_inner = (
+    f'<img src="{LOGO_URL}" alt="{BRAND_NAME}" '
+    f'style="width:100%;height:100%;object-fit:cover;border-radius:.6rem;">'
+    if LOGO_URL else
+    '<svg width="15" height="15" fill="none" viewBox="0 0 24 24" '
+    'stroke="currentColor" stroke-width="2.5">\n        '
+    '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>\n      </svg>'
+)
+
+_HTML = (
+    _HTML
+    # text
+    .replace("Image Intelligence · ISD",    f"{BRAND_NAME} · ISD")
+    .replace(">Image Intelligence<",        f">{BRAND_NAME}<")
+    .replace(">ISD · Reverse Image Search<", f">{BRAND_SUBTITLE}<")
+    .replace(
+        'Find where <span class="grad">any image</span><br>appears online',
+        HERO_HEADING,
+    )
+    .replace(
+        "Paste a URL or upload a file to search across the web, then export a full visual report in CSV, Excel, or HTML.",
+        HERO_SUBTEXT,
+    )
+    # logo
+    .replace(
+        '<svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">\n        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>\n      </svg>',
+        _logo_inner,
+    )
+    # colours
+    .replace("#7c3aed", COLOR_PRIMARY)
+    .replace("#8b5cf6", COLOR_SECONDARY)
+    .replace("#a855f7", COLOR_GRADIENT)
+    # font
+    .replace(
+        "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap",
+        FONT_URL,
+    )
+    .replace("'Inter',", f"'{FONT_NAME}',")
+)
