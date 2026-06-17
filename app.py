@@ -83,6 +83,9 @@ async def search(
 
         results = parse_results(data)
 
+        # temporary debug — remove once result keys are confirmed
+        raw_keys = list(data.keys())
+
         if results:
             prefix = str(work_dir / "results")
 
@@ -93,7 +96,7 @@ async def search(
 
             await loop.run_in_executor(_pool, _exports)
 
-        return {"search_id": search_id, "count": len(results), "results": results}
+        return {"search_id": search_id, "count": len(results), "results": results, "debug_raw_keys": raw_keys}
 
     except HTTPException:
         shutil.rmtree(work_dir, ignore_errors=True)
