@@ -93,8 +93,10 @@ def parse_results(data: dict) -> list[dict]:
 # ── Exports ───────────────────────────────────────────────────────────────────
 
 def export_csv(results: list[dict], path: str) -> None:
+    has_source_image = any("source_image" in r for r in results)
+    fields = (["source_image"] if has_source_image else []) + ["engine", "title", "url", "source", "thumbnail"]
     with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=["engine", "title", "url", "source", "thumbnail"], extrasaction="ignore")
+        writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(results)
     print(f"  CSV   → {path}")
@@ -124,7 +126,8 @@ def export_excel(results: list[dict], path: str) -> None:
     ws.title = "Results"
 
     # Header row
-    headers = ["#", "Thumbnail", "Title", "URL", "Source", "Engine"]
+    has_source_image = any("source_image" in r for r in results)
+    headers = (["Source Image"] if has_source_image else []) + ["#", "Thumbnail", "Title", "URL", "Source", "Engine"]
     header_fill = PatternFill("solid", fgColor="222222")
     header_font = Font(bold=True, color="FFFFFF")
     for col, h in enumerate(headers, 1):
@@ -132,12 +135,10 @@ def export_excel(results: list[dict], path: str) -> None:
         cell.fill = header_fill
         cell.font = header_font
 
-    ws.column_dimensions["A"].width = 5
-    ws.column_dimensions["B"].width = 18
-    ws.column_dimensions["C"].width = 45
-    ws.column_dimensions["D"].width = 65
-    ws.column_dimensions["E"].width = 30
-    ws.column_dimensions["F"].width = 15
+    o = 1 if has_source_image else 0  # column offset
+    col_widths = ([30] if has_source_image else []) + [5, 18, 45, 65, 30, 15]
+    for i, w in enumerate(col_widths, 1):
+        ws.column_dimensions[ws.cell(1, i).column_letter].width = w
 
     ROW_HEIGHT = 70  # points ≈ 93 px
 
@@ -145,20 +146,23 @@ def export_excel(results: list[dict], path: str) -> None:
         row = i + 1
         ws.row_dimensions[row].height = ROW_HEIGHT
 
-        ws.cell(row=row, column=1, value=i)
+        if has_source_image:
+            ws.cell(row=row, column=1, value=result.get("source_image", "")).alignment = Alignment(vertical="center", wrap_text=True)
 
-        title_cell = ws.cell(row=row, column=3, value=result["title"])
+        ws.cell(row=row, column=1 + o, value=i)
+
+        title_cell = ws.cell(row=row, column=3 + o, value=result["title"])
         title_cell.alignment = Alignment(wrap_text=True, vertical="center")
 
         url = result["url"]
-        url_cell = ws.cell(row=row, column=4, value=url)
+        url_cell = ws.cell(row=row, column=4 + o, value=url)
         if url:
             url_cell.hyperlink = url
             url_cell.style = "Hyperlink"
         url_cell.alignment = Alignment(wrap_text=True, vertical="center")
 
-        ws.cell(row=row, column=5, value=result["source"]).alignment = Alignment(vertical="center")
-        ws.cell(row=row, column=6, value=result.get("engine", "")).alignment = Alignment(vertical="center")
+        ws.cell(row=row, column=5 + o, value=result["source"]).alignment = Alignment(vertical="center")
+        ws.cell(row=row, column=6 + o, value=result.get("engine", "")).alignment = Alignment(vertical="center")
 
         thumb_url = result.get("thumbnail", "")
         if thumb_url:
@@ -180,6 +184,8 @@ def export_excel(results: list[dict], path: str) -> None:
 
 
 def export_html(results: list[dict], path: str, source_image_url: str) -> None:
+    has_source_image = any("source_image" in r for r in results)
+    src_img_header = "<th>Source Image</th>" if has_source_image else ""
     rows = ""
     for i, r in enumerate(results, 1):
         thumb = r.get("thumbnail", "")
@@ -191,8 +197,10 @@ def export_html(results: list[dict], path: str, source_image_url: str) -> None:
         )
         url = r.get("url", "")
         link = f'<a href="{url}" target="_blank" rel="noopener">{url}</a>' if url else "—"
+        src_img_cell = f"<td>{r.get('source_image', '')}</td>" if has_source_image else ""
         rows += (
             f"<tr>"
+            f"{src_img_cell}"
             f"<td>{i}</td>"
             f"<td class='thumb'>{img_tag}</td>"
             f"<td>{r.get('title', '')}</td>"
@@ -247,7 +255,7 @@ def export_html(results: list[dict], path: str, source_image_url: str) -> None:
     <col class="n"><col class="thumb"><col class="title"><col><col class="src">
   </colgroup>
   <thead>
-    <tr><th>#</th><th>Thumbnail</th><th>Title</th><th>URL</th><th>Source</th><th>Engine</th></tr>
+    <tr>{src_img_header}<th>#</th><th>Thumbnail</th><th>Title</th><th>URL</th><th>Source</th><th>Engine</th></tr>
   </thead>
   <tbody>
 {rows}  </tbody>

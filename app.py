@@ -6,12 +6,14 @@ Set SERPAPI_KEY as an environment variable, then run:
 """
 
 import asyncio
+import json
 import os
 import shutil
 import tempfile
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import List
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
@@ -129,6 +131,97 @@ async def download_file(search_id: str, fmt: str):
         "html": "text/html",
     }
     return FileResponse(fpath, media_type=media[fmt], filename=f"results.{fmt}")
+
+
+@app.post("/api/bulk-search")
+async def bulk_search(
+    request: Request,
+    files: List[UploadFile] = File(default=[]),
+    urls: str = Form(default=""),
+):
+    if not SERPAPI_KEY:
+        raise HTTPException(500, "Server not configured — SERPAPI_KEY missing")
+
+    targets = []
+
+    for file in files[:5]:
+        if file.filename:
+            search_id = str(uuid.uuid4())
+            work_dir = TEMP_DIR / search_id
+            work_dir.mkdir()
+            content = await file.read()
+            suffix = Path(file.filename).suffix or ".jpg"
+            filename = f"input{suffix}"
+            (work_dir / filename).write_bytes(content)
+            public_url = str(request.base_url) + f"uploads/{search_id}/{filename}"
+            targets.append((search_id, work_dir, public_url, file.filename))
+
+    for url in [u.strip() for u in urls.splitlines() if u.strip()][:max(0, 5 - len(targets))]:
+        search_id = str(uuid.uuid4())
+        work_dir = TEMP_DIR / search_id
+        work_dir.mkdir()
+        targets.append((search_id, work_dir, url, url))
+
+    if not targets:
+        raise HTTPException(400, "Provide at least one image or URL")
+
+    loop = asyncio.get_event_loop()
+
+    async def _search_one(search_id, work_dir, search_url, source_label):
+        try:
+            results = await loop.run_in_executor(_pool, search_all_engines, search_url, SERPAPI_KEY)
+            for r in results:
+                r["source_image"] = source_label
+            if results:
+                prefix = str(work_dir / "results")
+                def _exports():
+                    export_csv(results, f"{prefix}.csv")
+                    export_excel(results, f"{prefix}.xlsx")
+                    export_html(results, f"{prefix}.html", source_label)
+                await loop.run_in_executor(_pool, _exports)
+            (work_dir / "results.json").write_text(json.dumps(results))
+            return {"search_id": search_id, "source_label": source_label, "count": len(results), "results": results}
+        except Exception as e:
+            return {"search_id": search_id, "source_label": source_label, "count": 0, "results": [], "error": str(e)}
+
+    searches = await asyncio.gather(*[_search_one(*t) for t in targets])
+    return {"searches": list(searches)}
+
+
+@app.get("/api/download/combined/{fmt}")
+async def download_combined(fmt: str, ids: str):
+    if fmt not in {"csv", "xlsx", "html"}:
+        raise HTTPException(400, "Invalid format")
+
+    all_results = []
+    for sid in ids.split(","):
+        sid = sid.strip()
+        if not sid or "/" in sid or ".." in sid:
+            continue
+        json_path = TEMP_DIR / sid / "results.json"
+        if json_path.exists():
+            all_results.extend(json.loads(json_path.read_text()))
+
+    if not all_results:
+        raise HTTPException(404, "No results found — please run a new search")
+
+    combined_dir = TEMP_DIR / "combined"
+    combined_dir.mkdir(exist_ok=True)
+    prefix = str(combined_dir / ids.replace(",", "_")[:60])
+
+    media = {
+        "csv":  "text/csv",
+        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "html": "text/html",
+    }
+    if fmt == "csv":
+        export_csv(all_results, f"{prefix}.csv")
+    elif fmt == "xlsx":
+        export_excel(all_results, f"{prefix}.xlsx")
+    else:
+        export_html(all_results, f"{prefix}.html", "Combined bulk search")
+
+    return FileResponse(f"{prefix}.{fmt}", media_type=media[fmt], filename=f"combined_results.{fmt}")
 
 
 # ── HTML ──────────────────────────────────────────────────────────────────────
@@ -414,6 +507,53 @@ _HTML = """<!DOCTYPE html>
     .empty svg { margin: 0 auto 1rem; display: block; }
     .empty p { font-size: .9375rem; }
 
+    /* ── Bulk file list ── */
+    .bulk-file-list { display: flex; flex-direction: column; gap: .5rem; margin-top: 1rem; }
+    .bulk-file-item {
+      display: flex; align-items: center; gap: .75rem;
+      padding: .5rem .75rem;
+      background: var(--brand-50); border: 1px solid var(--brand-100); border-radius: .625rem;
+    }
+    .bulk-file-item img { width: 2.5rem; height: 2.5rem; object-fit: cover; border-radius: .25rem; flex-shrink: 0; }
+    .bulk-file-name { flex: 1; font-size: .875rem; font-weight: 500; color: var(--gray-700); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .bulk-remove {
+      width: 1.5rem; height: 1.5rem; border: none; background: none; cursor: pointer;
+      color: var(--gray-400); border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      padding: 0; flex-shrink: 0; transition: background .15s, color .15s;
+    }
+    .bulk-remove:hover { background: var(--gray-200); color: var(--gray-600); }
+
+    /* ── Bulk results ── */
+    .bulk-results { display: none; }
+    .bulk-results.show { display: block; animation: fadeUp .3s ease; }
+    .bulk-summary-bar {
+      display: flex; align-items: center; justify-content: space-between;
+      flex-wrap: wrap; gap: .75rem; margin-bottom: 1.25rem;
+    }
+    .bulk-summary-text { font-size: 1rem; font-weight: 600; color: var(--gray-900); }
+    .bulk-summary-text .num {
+      font-size: 1.75rem; font-weight: 700; line-height: 1;
+      background: linear-gradient(135deg, #7c3aed, #a855f7);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text; margin-right: .25rem;
+    }
+
+    .image-section { margin-bottom: 1rem; border: 1px solid rgba(0,0,0,.06); border-radius: var(--radius); overflow: hidden; background: #fff; box-shadow: var(--shadow); }
+    .section-header {
+      display: flex; align-items: center; gap: .75rem;
+      padding: .875rem 1.25rem; cursor: pointer;
+      background: var(--gray-50); user-select: none;
+      transition: background .15s;
+    }
+    .section-header:hover { background: var(--gray-100); }
+    .section-toggle { font-size: .75rem; color: var(--gray-400); transition: transform .2s; flex-shrink: 0; }
+    .section-toggle.open { transform: rotate(90deg); }
+    .section-filename { font-size: .9375rem; font-weight: 600; color: var(--gray-800); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .section-count { font-size: .8125rem; font-weight: 500; color: var(--gray-500); flex-shrink: 0; }
+    .section-body { display: none; }
+    .section-body.open { display: block; }
+    .section-dl { display: flex; gap: .5rem; flex-wrap: wrap; padding: .875rem 1.25rem; border-top: 1px solid var(--gray-100); }
+
     /* ── Responsive ── */
     @media (max-width: 600px) {
       main { padding: 2rem 1rem 4rem; }
@@ -451,6 +591,7 @@ _HTML = """<!DOCTYPE html>
     <div class="tabs">
       <button class="tab-btn active" id="tab-url"  onclick="switchTab('url')">Image URL</button>
       <button class="tab-btn"        id="tab-file" onclick="switchTab('file')">Upload File</button>
+      <button class="tab-btn"        id="tab-bulk" onclick="switchTab('bulk')">Bulk Upload</button>
     </div>
 
     <!-- URL panel -->
@@ -480,6 +621,20 @@ _HTML = """<!DOCTYPE html>
           </svg>
         </button>
       </div>
+    </div>
+
+    <!-- Bulk panel -->
+    <div id="panel-bulk" style="display:none">
+      <label>Drop up to 5 images, or <strong style="color:var(--brand);cursor:pointer" onclick="document.getElementById('bulk-input').click()">browse</strong></label>
+      <div class="drop-zone" id="bulk-drop-zone" onclick="document.getElementById('bulk-input').click()" style="margin-top:.5rem">
+        <svg class="dz-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
+        </svg>
+        <p>Drop images here, or <strong>browse</strong></p>
+        <p class="hint">Up to 5 images · JPG, PNG, GIF, WebP</p>
+      </div>
+      <input type="file" id="bulk-input" accept="image/*" multiple style="display:none">
+      <div class="bulk-file-list" id="bulk-file-list"></div>
     </div>
 
     <button class="search-btn" id="search-btn" onclick="doSearch()">
@@ -557,6 +712,31 @@ _HTML = """<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- Bulk results -->
+  <div class="bulk-results" id="bulk-results">
+    <div class="bulk-summary-bar">
+      <div class="bulk-summary-text">
+        <span class="num" id="bulk-image-count">0</span> images &nbsp;·&nbsp;
+        <span class="num" id="bulk-total-count">0</span> total results
+      </div>
+      <div class="dl-btns">
+        <button class="dl-btn" onclick="dlAllCombined('csv')">
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+          All · CSV
+        </button>
+        <button class="dl-btn" onclick="dlAllCombined('xlsx')">
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+          All · Excel
+        </button>
+        <button class="dl-btn" onclick="dlAllCombined('html')">
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+          All · HTML
+        </button>
+      </div>
+    </div>
+    <div id="bulk-sections"></div>
+  </div>
+
 </main>
 
 <script>
@@ -569,8 +749,12 @@ _HTML = """<!DOCTYPE html>
     activeTab = tab;
     show('panel-url',  tab === 'url');
     show('panel-file', tab === 'file');
+    show('panel-bulk', tab === 'bulk');
     document.getElementById('tab-url').classList.toggle('active',  tab === 'url');
     document.getElementById('tab-file').classList.toggle('active', tab === 'file');
+    document.getElementById('tab-bulk').classList.toggle('active', tab === 'bulk');
+    const btn = document.getElementById('search-btn');
+    btn.style.display = tab === 'bulk' ? 'none' : '';
   }
 
   // ── Drag and drop ──────────────────────────────────────────────────────────
@@ -599,6 +783,161 @@ _HTML = """<!DOCTYPE html>
     chosenFile = null; fi.value = '';
     document.getElementById('file-preview').classList.remove('show');
     document.getElementById('preview-img').src = '';
+  }
+
+  // ── Bulk upload ────────────────────────────────────────────────────────────
+  let bulkFiles = [];
+  let bulkSearchIds = [];
+
+  const bulkDz = document.getElementById('bulk-drop-zone');
+  const bulkFi = document.getElementById('bulk-input');
+
+  bulkDz.addEventListener('dragover',  e => { e.preventDefault(); bulkDz.classList.add('drag-over'); });
+  bulkDz.addEventListener('dragleave', ()  => bulkDz.classList.remove('drag-over'));
+  bulkDz.addEventListener('drop', e => {
+    e.preventDefault(); bulkDz.classList.remove('drag-over');
+    Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/')).forEach(addBulkFile);
+  });
+  bulkFi.addEventListener('change', () => { Array.from(bulkFi.files).forEach(addBulkFile); bulkFi.value = ''; });
+
+  function addBulkFile(f) {
+    if (bulkFiles.length >= 5) { alert('Maximum 5 images.'); return; }
+    if (bulkFiles.find(x => x.name === f.name && x.size === f.size)) return;
+    bulkFiles.push(f);
+    renderBulkFileList();
+  }
+
+  function removeBulkFile(idx) {
+    bulkFiles.splice(idx, 1);
+    renderBulkFileList();
+  }
+
+  function renderBulkFileList() {
+    const list = document.getElementById('bulk-file-list');
+    list.innerHTML = '';
+    bulkFiles.forEach((f, i) => {
+      const item = document.createElement('div');
+      item.className = 'bulk-file-item';
+      const reader = new FileReader();
+      reader.onload = e => { item.querySelector('img').src = e.target.result; };
+      reader.readAsDataURL(f);
+      item.innerHTML = `<img src="" alt=""><span class="bulk-file-name">${h(f.name)}</span>
+        <button class="bulk-remove" onclick="removeBulkFile(${i})" title="Remove">
+          <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>`;
+      list.appendChild(item);
+      reader.onload = e => { item.querySelector('img').src = e.target.result; };
+      reader.readAsDataURL(f);
+    });
+    if (bulkFiles.length > 0 && !document.getElementById('bulk-search-btn')) {
+      const btn = document.createElement('button');
+      btn.id = 'bulk-search-btn';
+      btn.className = 'search-btn';
+      btn.style.marginTop = '1.5rem';
+      btn.innerHTML = `<svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> Search ${bulkFiles.length} Image${bulkFiles.length > 1 ? 's' : ''}`;
+      btn.onclick = doBulkSearch;
+      list.after(btn);
+    } else if (document.getElementById('bulk-search-btn')) {
+      const btn = document.getElementById('bulk-search-btn');
+      if (bulkFiles.length === 0) { btn.remove(); }
+      else btn.innerHTML = `<svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> Search ${bulkFiles.length} Image${bulkFiles.length > 1 ? 's' : ''}`;
+    }
+  }
+
+  async function doBulkSearch() {
+    if (!bulkFiles.length) { alert('Please add at least one image.'); return; }
+    setLoading(true);
+    cls('bulk-results'); cls('results'); cls('error-box');
+    try {
+      const fd = new FormData();
+      bulkFiles.forEach(f => fd.append('files', f));
+      const resp = await fetch('/api/bulk-search', { method: 'POST', body: fd });
+      const data = await resp.json();
+      if (!resp.ok) { showError(data.detail || 'An unexpected error occurred.'); return; }
+      renderBulkResults(data.searches);
+    } catch {
+      showError('Network error — please check your connection and try again.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function renderBulkResults(searches) {
+    bulkSearchIds = searches.map(s => s.search_id);
+    const totalResults = searches.reduce((sum, s) => sum + s.count, 0);
+    document.getElementById('bulk-image-count').textContent = searches.length;
+    document.getElementById('bulk-total-count').textContent = totalResults;
+
+    const container = document.getElementById('bulk-sections');
+    container.innerHTML = '';
+    searches.forEach((s, idx) => {
+      const section = document.createElement('div');
+      section.className = 'image-section';
+      const label = s.source_label || `Image ${idx + 1}`;
+      const shortLabel = label.length > 60 ? label.slice(0, 57) + '…' : label;
+
+      let tableRows = '';
+      if (!s.results || !s.results.length) {
+        tableRows = `<tr><td colspan="5"><div class="empty" style="padding:2rem"><p>No results found.</p></div></td></tr>`;
+      } else {
+        s.results.forEach((r, i) => {
+          const thumbCell = r.thumbnail
+            ? `<img class="thumb-img" src="${h(r.thumbnail)}" alt="" loading="lazy" onerror="this.style.display='none'">`
+            : `<div class="thumb-empty"></div>`;
+          const titleCell = r.url
+            ? `<a class="title-link" href="${h(r.url)}" target="_blank" rel="noopener">${h(r.title || r.url)}</a>`
+            : `<span style="color:var(--gray-400)">${h(r.title || '—')}</span>`;
+          const engineClass = r.engine && r.engine.includes('·') ? 'multi' : r.engine === 'Yandex' ? 'yandex' : r.engine === 'Bing' ? 'bing' : 'google';
+          const badge = r.engine ? `<span class="engine-badge ${engineClass}">${h(r.engine)}</span>` : '—';
+          tableRows += `<tr>
+            <td><span class="row-num">${i + 1}</span></td>
+            <td>${thumbCell}</td>
+            <td>${titleCell}</td>
+            <td><span class="source-text">${h(r.source || '—')}</span></td>
+            <td>${badge}</td>
+          </tr>`;
+        });
+      }
+
+      section.innerHTML = `
+        <div class="section-header" onclick="toggleSection(this)">
+          <span class="section-toggle${idx === 0 ? ' open' : ''}">▶</span>
+          <span class="section-filename" title="${h(label)}">${h(shortLabel)}</span>
+          <span class="section-count">${s.count} result${s.count !== 1 ? 's' : ''}</span>
+        </div>
+        <div class="section-body${idx === 0 ? ' open' : ''}">
+          <div class="section-dl">
+            <button class="dl-btn" onclick="dlBulk('${s.search_id}','csv')">↓ CSV</button>
+            <button class="dl-btn" onclick="dlBulk('${s.search_id}','xlsx')">↓ Excel</button>
+            <button class="dl-btn" onclick="dlBulk('${s.search_id}','html')">↓ HTML</button>
+          </div>
+          <div class="table-wrap" style="border-radius:0;border:none;border-top:1px solid var(--gray-100)">
+            <table>
+              <thead><tr><th class="col-n">#</th><th class="col-thumb">Preview</th><th>Title</th><th class="col-src">Source</th><th class="col-eng">Engine</th></tr></thead>
+              <tbody>${tableRows}</tbody>
+            </table>
+          </div>
+        </div>`;
+      container.appendChild(section);
+    });
+
+    document.getElementById('bulk-results').classList.add('show');
+  }
+
+  function toggleSection(header) {
+    const toggle = header.querySelector('.section-toggle');
+    const body = header.nextElementSibling;
+    const open = body.classList.toggle('open');
+    toggle.classList.toggle('open', open);
+  }
+
+  function dlBulk(searchId, fmt) {
+    window.location.href = `/api/download/${searchId}/${fmt}`;
+  }
+
+  function dlAllCombined(fmt) {
+    if (!bulkSearchIds.length) return;
+    window.location.href = `/api/download/combined/${fmt}?ids=${bulkSearchIds.join(',')}`;
   }
 
   // ── Search ─────────────────────────────────────────────────────────────────
@@ -679,12 +1018,15 @@ _HTML = """<!DOCTYPE html>
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   function setLoading(on) {
+    const isBulk = activeTab === 'bulk';
     document.getElementById('loading').classList.toggle('show', on);
-    const btn = document.getElementById('search-btn');
+    document.querySelector('.loading p').textContent = isBulk ? `Searching ${bulkFiles.length} images across 3 engines…` : 'Searching the web…';
+    const btn = document.getElementById(isBulk ? 'bulk-search-btn' : 'search-btn');
+    if (!btn) return;
     btn.disabled = on;
     btn.innerHTML = on
       ? `<span style="display:inline-block;width:15px;height:15px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite"></span>&nbsp;Searching…`
-      : `<svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> Search`;
+      : `<svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> ${isBulk ? `Search ${bulkFiles.length} Image${bulkFiles.length > 1 ? 's' : ''}` : 'Search'}`;
   }
 
   function showError(msg) {
