@@ -64,8 +64,7 @@ def search_all_engines(image_url: str, api_key: str) -> list[dict]:
         ({"engine": "bing_visual_search", "image_url": image_url, "api_key": api_key}, "Bing"),
     ]
 
-    results = []
-    seen_urls = set()
+    by_url = {}
 
     with ThreadPoolExecutor(max_workers=3) as executor:
         futures = {executor.submit(_call_engine, params): label for params, label in engines}
@@ -74,11 +73,16 @@ def search_all_engines(image_url: str, api_key: str) -> list[dict]:
             data = future.result()
             if "_request_error" not in data:
                 for r in _parse_engine_results(data, label):
-                    if r["url"] and r["url"] not in seen_urls:
-                        seen_urls.add(r["url"])
-                        results.append(r)
+                    if not r["url"]:
+                        continue
+                    if r["url"] in by_url:
+                        existing = by_url[r["url"]]
+                        if label not in existing["engine"]:
+                            existing["engine"] += f" · {label}"
+                    else:
+                        by_url[r["url"]] = r
 
-    return results
+    return list(by_url.values())
 
 
 def parse_results(data: dict) -> list[dict]:

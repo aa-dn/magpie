@@ -374,6 +374,7 @@ _HTML = """<!DOCTYPE html>
     .engine-badge.google { background: #e8f0fe; color: #1a56c4; }
     .engine-badge.yandex { background: #fde8e8; color: #c41a1a; }
     .engine-badge.bing   { background: #e8faf0; color: #1a7a46; }
+    .engine-badge.multi  { background: #f3e8ff; color: #7c3aed; }
     td {
       padding: .875rem 1rem; font-size: .875rem; color: var(--gray-700);
       vertical-align: middle; border-bottom: 1px solid var(--gray-50);
@@ -655,7 +656,7 @@ _HTML = """<!DOCTYPE html>
           ? `<a class="title-link" href="${h(r.url)}" target="_blank" rel="noopener">${h(r.title || r.url)}</a>`
           : `<span style="color:var(--gray-400)">${h(r.title || '—')}</span>`;
 
-        const engineClass = r.engine === 'Yandex' ? 'yandex' : r.engine === 'Bing' ? 'bing' : 'google';
+        const engineClass = r.engine && r.engine.includes('·') ? 'multi' : r.engine === 'Yandex' ? 'yandex' : r.engine === 'Bing' ? 'bing' : 'google';
         const engineBadge = r.engine ? `<span class="engine-badge ${engineClass}">${h(r.engine)}</span>` : '—';
 
         tbody.innerHTML += `<tr>
