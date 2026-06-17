@@ -35,6 +35,16 @@ app = FastAPI(title="Image Intelligence")
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
+@app.get("/debug/env")
+async def debug_env():
+    key = os.environ.get("SERPAPI_KEY", "")
+    return {
+        "SERPAPI_KEY_set": bool(key),
+        "SERPAPI_KEY_length": len(key),
+        "all_env_keys": sorted(os.environ.keys()),
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index():
     return _HTML
