@@ -35,6 +35,15 @@ app = FastAPI(title="Image Intelligence")
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
+@app.get("/debug/search")
+async def debug_search(url: str):
+    import requests as req
+    params = {"engine": "google_reverse_image", "image_url": url, "api_key": SERPAPI_KEY}
+    r = req.get("https://serpapi.com/search", params=params, timeout=30)
+    data = r.json()
+    return {"status": r.status_code, "top_level_keys": list(data.keys()), "raw": data}
+
+
 @app.get("/debug/env")
 async def debug_env():
     key = os.environ.get("SERPAPI_KEY", "")
