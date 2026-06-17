@@ -13,16 +13,14 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 
 from reverse_image_search import (
     export_csv,
     export_excel,
     export_html,
-    parse_results,
-    search_reverse_image,
-    upload_and_search,
+    search_all_engines,
 )
 
 SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
@@ -34,14 +32,6 @@ app = FastAPI(title="Image Intelligence")
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
-
-@app.get("/debug/search")
-async def debug_search(url: str):
-    import requests as req
-    params = {"engine": "google_reverse_image", "image_url": url, "api_key": SERPAPI_KEY}
-    r = req.get("https://serpapi.com/search", params=params, timeout=30)
-    data = r.json()
-    return {"status": r.status_code, "top_level_keys": list(data.keys()), "raw": data}
 
 
 @app.get("/debug/env")
@@ -59,8 +49,19 @@ async def index():
     return _HTML
 
 
+@app.get("/uploads/{search_id}/{filename}")
+async def serve_upload(search_id: str, filename: str):
+    if "/" in search_id or ".." in search_id or "/" in filename or ".." in filename:
+        raise HTTPException(400, "Invalid path")
+    fpath = TEMP_DIR / search_id / filename
+    if not fpath.exists():
+        raise HTTPException(404, "File not found")
+    return FileResponse(fpath)
+
+
 @app.post("/api/search")
 async def search(
+    request: Request,
     image_url: str = Form(default=None),
     file: UploadFile = File(default=None),
 ):
@@ -76,24 +77,20 @@ async def search(
         if file and file.filename:
             content = await file.read()
             suffix = Path(file.filename).suffix or ".jpg"
-            img_path = work_dir / f"input{suffix}"
+            filename = f"input{suffix}"
+            img_path = work_dir / filename
             img_path.write_bytes(content)
-            data = await loop.run_in_executor(
-                _pool, upload_and_search, str(img_path), SERPAPI_KEY
-            )
+            search_url = str(request.base_url) + f"uploads/{search_id}/{filename}"
             source_label = file.filename
         elif image_url and image_url.strip():
-            data = await loop.run_in_executor(
-                _pool, search_reverse_image, image_url.strip(), SERPAPI_KEY
-            )
+            search_url = image_url.strip()
             source_label = image_url.strip()
         else:
             raise HTTPException(400, "Provide an image URL or upload a file")
 
-        results = parse_results(data)
-
-        # temporary debug — remove once result keys are confirmed
-        raw_keys = list(data.keys())
+        results = await loop.run_in_executor(
+            _pool, search_all_engines, search_url, SERPAPI_KEY
+        )
 
         if results:
             prefix = str(work_dir / "results")
@@ -105,7 +102,7 @@ async def search(
 
             await loop.run_in_executor(_pool, _exports)
 
-        return {"search_id": search_id, "count": len(results), "results": results, "debug_raw_keys": raw_keys}
+        return {"search_id": search_id, "count": len(results), "results": results}
 
     except HTTPException:
         shutil.rmtree(work_dir, ignore_errors=True)
@@ -367,6 +364,16 @@ _HTML = """<!DOCTYPE html>
     th.col-n     { width: 3rem; }
     th.col-thumb { width: 7.5rem; }
     th.col-src   { width: 9rem; }
+    th.col-eng   { width: 7rem; }
+
+    .engine-badge {
+      display: inline-block; padding: .2rem .55rem;
+      border-radius: 999px; font-size: .7rem; font-weight: 600;
+      white-space: nowrap;
+    }
+    .engine-badge.google { background: #e8f0fe; color: #1a56c4; }
+    .engine-badge.yandex { background: #fde8e8; color: #c41a1a; }
+    .engine-badge.bing   { background: #e8faf0; color: #1a7a46; }
     td {
       padding: .875rem 1rem; font-size: .875rem; color: var(--gray-700);
       vertical-align: middle; border-bottom: 1px solid var(--gray-50);
@@ -533,6 +540,7 @@ _HTML = """<!DOCTYPE html>
           <col class="col-thumb">
           <col>
           <col class="col-src">
+          <col class="col-eng">
         </colgroup>
         <thead>
           <tr>
@@ -540,6 +548,7 @@ _HTML = """<!DOCTYPE html>
             <th class="col-thumb">Preview</th>
             <th>Title</th>
             <th class="col-src">Source</th>
+            <th class="col-eng">Engine</th>
           </tr>
         </thead>
         <tbody id="results-tbody"></tbody>
@@ -646,11 +655,15 @@ _HTML = """<!DOCTYPE html>
           ? `<a class="title-link" href="${h(r.url)}" target="_blank" rel="noopener">${h(r.title || r.url)}</a>`
           : `<span style="color:var(--gray-400)">${h(r.title || '—')}</span>`;
 
+        const engineClass = r.engine === 'Yandex' ? 'yandex' : r.engine === 'Bing' ? 'bing' : 'google';
+        const engineBadge = r.engine ? `<span class="engine-badge ${engineClass}">${h(r.engine)}</span>` : '—';
+
         tbody.innerHTML += `<tr>
           <td><span class="row-num">${i + 1}</span></td>
           <td>${thumbCell}</td>
           <td>${titleCell}</td>
           <td><span class="source-text" title="${h(r.source)}">${h(r.source || '—')}</span></td>
+          <td>${engineBadge}</td>
         </tr>`;
       });
     }

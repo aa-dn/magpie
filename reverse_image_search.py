@@ -20,47 +20,77 @@ from io import BytesIO
 
 # ── SerpAPI ───────────────────────────────────────────────────────────────────
 
+def _call_engine(params: dict) -> dict:
+    try:
+        resp = requests.get("https://serpapi.com/search", params=params, timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as e:
+        return {"_request_error": str(e)}
+
+
+def _parse_engine_results(data: dict, engine_label: str) -> list[dict]:
+    items = (
+        data.get("visual_matches") or
+        data.get("image_results") or
+        data.get("organic_results") or
+        []
+    )
+    results = []
+    for item in items:
+        thumb = item.get("thumbnail", "")
+        if isinstance(thumb, dict):
+            thumb = thumb.get("src", "")
+        results.append({
+            "title":     item.get("title", ""),
+            "url":       item.get("link") or item.get("url", ""),
+            "source":    item.get("source", ""),
+            "thumbnail": thumb or "",
+            "engine":    engine_label,
+        })
+    return results
+
+
 def search_reverse_image(image_url: str, api_key: str) -> dict:
-    params = {
-        "engine": "google_reverse_image",
-        "image_url": image_url,
-        "api_key": api_key,
-    }
-    resp = requests.get("https://serpapi.com/search", params=params, timeout=30)
-    resp.raise_for_status()
-    return resp.json()
+    return _call_engine({"engine": "google_lens", "url": image_url, "api_key": api_key})
 
 
-def upload_and_search(file_path: str, api_key: str) -> dict:
-    """For local image files — uploads via Google Lens endpoint."""
-    with open(file_path, "rb") as f:
-        files = {"encoded_image": (os.path.basename(file_path), f)}
-        params = {"engine": "google_lens", "api_key": api_key}
-        resp = requests.post("https://serpapi.com/search", params=params, files=files, timeout=30)
-    resp.raise_for_status()
-    return resp.json()
+def search_all_engines(image_url: str, api_key: str) -> list[dict]:
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    engines = [
+        ({"engine": "google_lens", "url": image_url, "api_key": api_key}, "Google Lens"),
+        ({"engine": "yandex_reverse_image_search", "image_url": image_url, "api_key": api_key}, "Yandex"),
+        ({"engine": "bing_visual_search", "image_url": image_url, "api_key": api_key}, "Bing"),
+    ]
+
+    results = []
+    seen_urls = set()
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {executor.submit(_call_engine, params): label for params, label in engines}
+        for future in as_completed(futures):
+            label = futures[future]
+            data = future.result()
+            if "_request_error" not in data:
+                for r in _parse_engine_results(data, label):
+                    if r["url"] and r["url"] not in seen_urls:
+                        seen_urls.add(r["url"])
+                        results.append(r)
+
+    return results
 
 
 def parse_results(data: dict) -> list[dict]:
-    """Extract page results from a SerpAPI reverse image search response."""
-    results = []
-
-    for item in data.get("image_results", []):
-        results.append({
-            "title":     item.get("title", ""),
-            "url":       item.get("link", ""),
-            "source":    item.get("source", ""),
-            "thumbnail": item.get("thumbnail", ""),
-        })
-
-    return results
+    """Extract results from a single SerpAPI response (used by CLI)."""
+    return _parse_engine_results(data, "Google Lens")
 
 
 # ── Exports ───────────────────────────────────────────────────────────────────
 
 def export_csv(results: list[dict], path: str) -> None:
     with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=["title", "url", "source", "thumbnail"])
+        writer = csv.DictWriter(f, fieldnames=["engine", "title", "url", "source", "thumbnail"], extrasaction="ignore")
         writer.writeheader()
         writer.writerows(results)
     print(f"  CSV   → {path}")
@@ -90,7 +120,7 @@ def export_excel(results: list[dict], path: str) -> None:
     ws.title = "Results"
 
     # Header row
-    headers = ["#", "Thumbnail", "Title", "URL", "Source"]
+    headers = ["#", "Thumbnail", "Title", "URL", "Source", "Engine"]
     header_fill = PatternFill("solid", fgColor="222222")
     header_font = Font(bold=True, color="FFFFFF")
     for col, h in enumerate(headers, 1):
@@ -103,6 +133,7 @@ def export_excel(results: list[dict], path: str) -> None:
     ws.column_dimensions["C"].width = 45
     ws.column_dimensions["D"].width = 65
     ws.column_dimensions["E"].width = 30
+    ws.column_dimensions["F"].width = 15
 
     ROW_HEIGHT = 70  # points ≈ 93 px
 
@@ -123,6 +154,7 @@ def export_excel(results: list[dict], path: str) -> None:
         url_cell.alignment = Alignment(wrap_text=True, vertical="center")
 
         ws.cell(row=row, column=5, value=result["source"]).alignment = Alignment(vertical="center")
+        ws.cell(row=row, column=6, value=result.get("engine", "")).alignment = Alignment(vertical="center")
 
         thumb_url = result.get("thumbnail", "")
         if thumb_url:
@@ -162,6 +194,7 @@ def export_html(results: list[dict], path: str, source_image_url: str) -> None:
             f"<td>{r.get('title', '')}</td>"
             f"<td class='url'>{link}</td>"
             f"<td>{r.get('source', '')}</td>"
+            f"<td>{r.get('engine', '')}</td>"
             f"</tr>\n"
         )
 
@@ -210,7 +243,7 @@ def export_html(results: list[dict], path: str, source_image_url: str) -> None:
     <col class="n"><col class="thumb"><col class="title"><col><col class="src">
   </colgroup>
   <thead>
-    <tr><th>#</th><th>Thumbnail</th><th>Title</th><th>URL</th><th>Source</th></tr>
+    <tr><th>#</th><th>Thumbnail</th><th>Title</th><th>URL</th><th>Source</th><th>Engine</th></tr>
   </thead>
   <tbody>
 {rows}  </tbody>
