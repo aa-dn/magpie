@@ -1000,7 +1000,7 @@ _HTML = """<!DOCTYPE html>
       const fd = new FormData();
       let resp, data;
       if (activeTab === 'url') {
-        const urls = document.getElementById('url-input').value.trim().split('\n').map(u => u.trim()).filter(Boolean);
+        const urls = document.getElementById('url-input').value.trim().split(/\r?\n/).map(u => u.trim()).filter(Boolean);
         if (urls.length === 1) {
           fd.append('image_url', urls[0]);
           resp = await fetch('/api/search', { method: 'POST', body: fd });
