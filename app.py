@@ -32,8 +32,8 @@ from reverse_image_search import (
 # Text
 BRAND_NAME     = '<span class="grad">magpie</span>'
 BRAND_SUBTITLE = '<span class="grad">Mag</span>ic <span class="grad">P</span>icture <span class="grad">I</span>ntelligence <span class="grad">E</span>xporter'
-HERO_HEADING   = 'Reverse search any image across Google, Yandex, and Bing with <span class="grad">magpie</span>.</span><br>'
-HERO_SUBTEXT   = 'Upload a photo or paste an image URL and to find other instances of its use across the web. Download results per photo, or all results combined.'
+HERO_HEADING   = 'Upload or link an image and this little <span class="grad">magpie</span> will go collect similar photos from Google, Yandex, and Bing for you.</span><br>'
+HERO_SUBTEXT   = 'Use him to find other instances of a picture across the web. Download results per photo, or all results combined. <br> (Take results with a grain of salt; he\'s only a bird.) '
 
 # Logo — leave blank to keep the default search icon,
 #         or paste a hosted image URL (e.g. from Imgur, your CDN, etc.)
@@ -346,31 +346,32 @@ _HTML = """<!DOCTYPE html>
 
     /* ── Card ── */
     .card {
-      background: #fff; border-radius: var(--radius);
-      border: 1px solid rgba(0,0,0,.06); box-shadow: var(--shadow);
+      background: linear-gradient(135deg, #7c3aed, #a855f7); border-radius: var(--radius);
+      border: 1px solid rgba(255,255,255,.15); box-shadow: var(--shadow);
       padding: 2rem; margin-bottom: 1.5rem;
     }
 
     /* ── Tabs ── */
     .tabs {
       display: inline-flex; gap: .25rem;
-      background: var(--gray-100); border-radius: .625rem;
+      background: rgba(255,255,255,.15); border-radius: .625rem;
       padding: .25rem; margin-bottom: 1.5rem;
     }
     .tab-btn {
       padding: .375rem .875rem; border-radius: .4375rem;
       font-size: .875rem; font-weight: 500;
       border: none; cursor: pointer;
-      color: var(--gray-500); background: transparent;
+      color: rgba(255,255,255,.7); background: transparent;
       transition: all .15s;
     }
     .tab-btn.active {
-      background: #fff; color: var(--gray-900);
-      box-shadow: 0 1px 4px rgba(0,0,0,.1);
+      background: rgba(255,255,255,.25); color: #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,.15);
     }
 
     /* ── Inputs ── */
     label { display: block; font-size: .875rem; font-weight: 500; color: var(--gray-700); margin-bottom: .5rem; }
+    .card label { color: rgba(255,255,255,.9); }
 
     input[type="url"] {
       width: 100%; padding: .75rem 1rem;
@@ -386,46 +387,46 @@ _HTML = """<!DOCTYPE html>
 
     /* ── Drop zone ── */
     .drop-zone {
-      border: 2px dashed var(--gray-200); border-radius: .75rem;
+      border: 2px dashed rgba(255,255,255,.4); border-radius: .75rem;
       padding: 2.5rem 1.5rem; text-align: center; cursor: pointer;
       transition: border-color .15s, background .15s;
     }
     .drop-zone:hover, .drop-zone.drag-over {
-      border-color: var(--brand-light); background: var(--brand-50);
+      border-color: rgba(255,255,255,.8); background: rgba(255,255,255,.1);
     }
-    .dz-icon { width: 2.5rem; height: 2.5rem; margin: 0 auto .75rem; color: var(--gray-300); }
-    .drop-zone p { font-size: .9375rem; color: var(--gray-600); margin-bottom: .25rem; }
-    .drop-zone p strong { color: var(--brand); }
-    .drop-zone .hint { font-size: .8125rem; color: var(--gray-400); }
+    .dz-icon { width: 2.5rem; height: 2.5rem; margin: 0 auto .75rem; color: rgba(255,255,255,.6); }
+    .drop-zone p { font-size: .9375rem; color: rgba(255,255,255,.9); margin-bottom: .25rem; }
+    .drop-zone p strong { color: #fff; }
+    .drop-zone .hint { font-size: .8125rem; color: rgba(255,255,255,.6); }
 
     /* ── File preview ── */
     .file-preview {
       display: none; align-items: center; gap: .75rem;
       margin-top: 1rem; padding: .75rem 1rem;
-      background: var(--brand-50); border: 1px solid var(--brand-100); border-radius: .625rem;
+      background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.25); border-radius: .625rem;
     }
     .file-preview.show { display: flex; }
     .file-preview img { width: 3rem; height: 3rem; object-fit: cover; border-radius: .375rem; }
-    .file-name { font-size: .875rem; font-weight: 500; color: var(--gray-700); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .file-name { font-size: .875rem; font-weight: 500; color: #fff; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .clear-btn {
       width: 1.5rem; height: 1.5rem; border: none; background: none;
-      cursor: pointer; color: var(--gray-400); border-radius: 50%;
+      cursor: pointer; color: rgba(255,255,255,.7); border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
       padding: 0; transition: background .15s, color .15s;
     }
-    .clear-btn:hover { background: var(--gray-200); color: var(--gray-600); }
+    .clear-btn:hover { background: rgba(255,255,255,.2); color: #fff; }
 
     /* ── Search button ── */
     .search-btn {
       width: 100%; padding: .875rem 1.5rem; margin-top: 1.5rem;
-      background: linear-gradient(135deg, #7c3aed, #a855f7);
-      color: #fff; font-family: inherit; font-size: .9375rem; font-weight: 600;
+      background: #fff;
+      color: #7c3aed; font-family: inherit; font-size: .9375rem; font-weight: 600;
       border: none; border-radius: .75rem; cursor: pointer;
       transition: transform .15s, box-shadow .15s, opacity .15s;
-      box-shadow: 0 2px 10px rgba(124,58,237,.35);
+      box-shadow: 0 2px 10px rgba(0,0,0,.2);
       display: flex; align-items: center; justify-content: center; gap: .5rem;
     }
-    .search-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 18px rgba(124,58,237,.45); }
+    .search-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 18px rgba(0,0,0,.3); }
     .search-btn:active:not(:disabled) { transform: translateY(0); }
     .search-btn:disabled { opacity: .6; cursor: not-allowed; transform: none !important; }
 
@@ -601,6 +602,7 @@ _HTML = """<!DOCTYPE html>
       .hero h2 { font-size: 1.5rem; }
       th.col-thumb, td:nth-child(2) { display: none; }
     }
+    #url-input::placeholder { color: rgba(255,255,255,.45); }
   </style>
 </head>
 <body>
@@ -626,7 +628,8 @@ _HTML = """<!DOCTYPE html>
     <div class="hero-img"><img src="HERO_IMAGE_PLACEHOLDER" alt=""></div>
     <div class="hero-text">
       <h2>Find where <span class="grad">any image</span><br>appears online</h2>
-      <p>Upload a photo or paste an image URL and magpie will reverse search it on Google, Yandex, and Bing to find all instances of it's use across the web. Download results per photo, or all results combined.</p>
+      <p>Use him to find other instances of a picture across the web. Download results per photo, or all results combined. <br> (Take results with a grain of salt; he\'s only a bird.)
+</p>
     </div>
   </div>
 
@@ -641,7 +644,7 @@ _HTML = """<!DOCTYPE html>
     <!-- URL panel -->
     <div id="panel-url">
       <label for="url-input">Paste image URLs — one per line</label>
-      <textarea id="url-input" rows="4" placeholder="https://example.com/photo1.jpg&#10;https://example.com/photo2.jpg" autocomplete="off" style="width:100%;resize:vertical;font-family:inherit;font-size:.9rem;padding:.6rem .75rem;border:1px solid var(--gray-200);border-radius:.6rem;box-sizing:border-box;"></textarea>
+      <textarea id="url-input" rows="4" placeholder="https://example.com/photo1.jpg&#10;https://example.com/photo2.jpg" autocomplete="off" style="width:100%;resize:vertical;font-family:inherit;font-size:.9rem;padding:.6rem .75rem;border:1.5px solid rgba(255,255,255,.4);border-radius:.6rem;box-sizing:border-box;background:rgba(255,255,255,.15);color:#fff;outline:none;"></textarea>
     </div>
 
     <!-- File panel -->
@@ -1126,7 +1129,7 @@ _HTML = (
         HERO_HEADING,
     )
     .replace(
-        "Paste a URL or upload a file to search across the web, then export a full visual report in CSV, Excel, or HTML.",
+        "Use him to find other instances of a picture across the web. Download results per photo, or all results combined. <br> (Take results with a grain of salt; he\'s only a bird.)",
         HERO_SUBTEXT,
     )
     # logo
