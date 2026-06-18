@@ -1,275 +1,18 @@
-#!/usr/bin/env python3
-"""
-Image Intelligence — web front-end for the reverse image search tool.
-Set SERPAPI_KEY as an environment variable, then run:
-    uvicorn app:app --reload
-"""
-
-import asyncio
-import json
-import os
-import shutil
-import tempfile
-import uuid
-from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
-from typing import List
-
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
-
-from reverse_image_search import (
-    export_csv,
-    export_excel,
-    export_html,
-    search_all_engines,
-)
-
-# ══════════════════════════════════════════════════════════════════════════════
-# BRANDING — edit these values to customise the tool's appearance
-# ══════════════════════════════════════════════════════════════════════════════
-
-# Text
-BRAND_NAME     = '<span class="grad">magpie</span>'
-BRAND_SUBTITLE = '<span class="grad">Mag</span>ic <span class="grad">P</span>icture <span class="grad">I</span>ntelligence <span class="grad">E</span>xporter'
-HERO_HEADING   = 'Reverse search any image across Google, Yandex, and Bing with <span class="grad">magpie</span>.</span><br>'
-HERO_SUBTEXT   = 'Upload a photo or paste an image URL and to find other instances of its use across the web. Download results per photo, or all results combined.'
-
-# Logo — leave blank to keep the default search icon,
-#         or paste a hosted image URL (e.g. from Imgur, your CDN, etc.)
-LOGO_URL = ""
-
-# Hero image — paste a hosted image URL to show a large image beside the hero text.
-#              Leave blank to keep the default centered text-only layout.
-HERO_IMAGE_URL = "https://i.ibb.co/v6J9vxqV/magpie.png"
-
-# Colours — paste hex codes from coolors.co
-COLOR_PRIMARY   = "#276db4"   # buttons, links, badges
-COLOR_SECONDARY = "#169566"   # hover states and lighter accents
-COLOR_GRADIENT  = "#169566"   # gradient endpoint (pairs with PRIMARY)
-
-# Font — from fonts.google.com: pick a font → Get embed code → paste the two values below
-FONT_NAME = "Tirra"
-FONT_URL  = "https://fonts.googleapis.com/css2?family=Tirra:wght@400;500;600;700;800;900&display=swap"
-
-# ══════════════════════════════════════════════════════════════════════════════
-
-SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
-TEMP_DIR = Path(tempfile.gettempdir()) / "ris_cache"
-TEMP_DIR.mkdir(exist_ok=True)
-
-_pool = ThreadPoolExecutor(max_workers=4)
-app = FastAPI(title="Image Intelligence")
-
-
-# ── Routes ────────────────────────────────────────────────────────────────────
-
-
-@app.get("/debug/env")
-async def debug_env():
-    key = os.environ.get("SERPAPI_KEY", "")
-    return {
-        "SERPAPI_KEY_set": bool(key),
-        "SERPAPI_KEY_length": len(key),
-        "all_env_keys": sorted(os.environ.keys()),
-    }
-
-
-@app.get("/", response_class=HTMLResponse)
-async def index():
-    return _HTML
-
-
-@app.get("/uploads/{search_id}/{filename}")
-async def serve_upload(search_id: str, filename: str):
-    if "/" in search_id or ".." in search_id or "/" in filename or ".." in filename:
-        raise HTTPException(400, "Invalid path")
-    fpath = TEMP_DIR / search_id / filename
-    if not fpath.exists():
-        raise HTTPException(404, "File not found")
-    return FileResponse(fpath)
-
-
-@app.post("/api/search")
-async def search(
-    request: Request,
-    image_url: str = Form(default=None),
-    file: UploadFile = File(default=None),
-):
-    if not SERPAPI_KEY:
-        raise HTTPException(500, "Server not configured — SERPAPI_KEY missing")
-
-    loop = asyncio.get_event_loop()
-    search_id = str(uuid.uuid4())
-    work_dir = TEMP_DIR / search_id
-    work_dir.mkdir()
-
-    try:
-        if file and file.filename:
-            content = await file.read()
-            suffix = Path(file.filename).suffix or ".jpg"
-            filename = f"input{suffix}"
-            img_path = work_dir / filename
-            img_path.write_bytes(content)
-            search_url = str(request.base_url) + f"uploads/{search_id}/{filename}"
-            source_label = file.filename
-        elif image_url and image_url.strip():
-            search_url = image_url.strip()
-            source_label = image_url.strip()
-        else:
-            raise HTTPException(400, "Provide an image URL or upload a file")
-
-        results = await loop.run_in_executor(
-            _pool, search_all_engines, search_url, SERPAPI_KEY
-        )
-
-        if results:
-            prefix = str(work_dir / "results")
-
-            def _exports():
-                export_csv(results, f"{prefix}.csv")
-                export_excel(results, f"{prefix}.xlsx")
-                export_html(results, f"{prefix}.html", source_label)
-
-            await loop.run_in_executor(_pool, _exports)
-
-        return {"search_id": search_id, "count": len(results), "results": results}
-
-    except HTTPException:
-        shutil.rmtree(work_dir, ignore_errors=True)
-        raise
-    except Exception as e:
-        shutil.rmtree(work_dir, ignore_errors=True)
-        raise HTTPException(500, str(e))
-
-
-@app.get("/api/download/{search_id}/{fmt}")
-async def download_file(search_id: str, fmt: str):
-    if fmt not in {"csv", "xlsx", "html"}:
-        raise HTTPException(400, "Invalid format")
-    if "/" in search_id or "\\" in search_id or ".." in search_id:
-        raise HTTPException(400, "Invalid ID")
-
-    fpath = TEMP_DIR / search_id / f"results.{fmt}"
-    if not fpath.exists():
-        raise HTTPException(404, "Results not found — please run a new search")
-
-    media = {
-        "csv":  "text/csv",
-        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "html": "text/html",
-    }
-    return FileResponse(fpath, media_type=media[fmt], filename=f"results.{fmt}")
-
-
-@app.post("/api/bulk-search")
-async def bulk_search(
-    request: Request,
-    files: List[UploadFile] = File(default=[]),
-    urls: str = Form(default=""),
-):
-    if not SERPAPI_KEY:
-        raise HTTPException(500, "Server not configured — SERPAPI_KEY missing")
-
-    targets = []
-
-    for file in files[:5]:
-        if file.filename:
-            search_id = str(uuid.uuid4())
-            work_dir = TEMP_DIR / search_id
-            work_dir.mkdir()
-            content = await file.read()
-            suffix = Path(file.filename).suffix or ".jpg"
-            filename = f"input{suffix}"
-            (work_dir / filename).write_bytes(content)
-            public_url = str(request.base_url) + f"uploads/{search_id}/{filename}"
-            targets.append((search_id, work_dir, public_url, file.filename))
-
-    for url in [u.strip() for u in urls.splitlines() if u.strip()][:max(0, 5 - len(targets))]:
-        search_id = str(uuid.uuid4())
-        work_dir = TEMP_DIR / search_id
-        work_dir.mkdir()
-        targets.append((search_id, work_dir, url, url))
-
-    if not targets:
-        raise HTTPException(400, "Provide at least one image or URL")
-
-    loop = asyncio.get_event_loop()
-
-    async def _search_one(search_id, work_dir, search_url, source_label):
-        try:
-            results = await loop.run_in_executor(_pool, search_all_engines, search_url, SERPAPI_KEY)
-            for r in results:
-                r["source_image"] = source_label
-            if results:
-                prefix = str(work_dir / "results")
-                def _exports():
-                    export_csv(results, f"{prefix}.csv")
-                    export_excel(results, f"{prefix}.xlsx")
-                    export_html(results, f"{prefix}.html", source_label)
-                await loop.run_in_executor(_pool, _exports)
-            (work_dir / "results.json").write_text(json.dumps(results))
-            return {"search_id": search_id, "source_label": source_label, "count": len(results), "results": results}
-        except Exception as e:
-            return {"search_id": search_id, "source_label": source_label, "count": 0, "results": [], "error": str(e)}
-
-    searches = await asyncio.gather(*[_search_one(*t) for t in targets])
-    return {"searches": list(searches)}
-
-
-@app.get("/api/download/combined/{fmt}")
-async def download_combined(fmt: str, ids: str):
-    if fmt not in {"csv", "xlsx", "html"}:
-        raise HTTPException(400, "Invalid format")
-
-    all_results = []
-    for sid in ids.split(","):
-        sid = sid.strip()
-        if not sid or "/" in sid or ".." in sid:
-            continue
-        json_path = TEMP_DIR / sid / "results.json"
-        if json_path.exists():
-            all_results.extend(json.loads(json_path.read_text()))
-
-    if not all_results:
-        raise HTTPException(404, "No results found — please run a new search")
-
-    combined_dir = TEMP_DIR / "combined"
-    combined_dir.mkdir(exist_ok=True)
-    prefix = str(combined_dir / ids.replace(",", "_")[:60])
-
-    media = {
-        "csv":  "text/csv",
-        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "html": "text/html",
-    }
-    if fmt == "csv":
-        export_csv(all_results, f"{prefix}.csv")
-    elif fmt == "xlsx":
-        export_excel(all_results, f"{prefix}.xlsx")
-    else:
-        export_html(all_results, f"{prefix}.html", "Combined bulk search")
-
-    return FileResponse(f"{prefix}.{fmt}", media_type=media[fmt], filename=f"combined_results.{fmt}")
-
-
-# ── HTML ──────────────────────────────────────────────────────────────────────
-
-_HTML = """<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Image Intelligence · ISD</title>
+  <title><span class="grad">magpie</span> · ISD</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Tirra:wght@400;500;600;700;800;900&display=swap">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
-      --brand:       #7c3aed;
-      --brand-light: #8b5cf6;
+      --brand:       #276db4;
+      --brand-light: #169566;
       --brand-50:    #f5f3ff;
       --brand-100:   #ede9fe;
       --gray-50:     #f9fafb;
@@ -287,7 +30,7 @@ _HTML = """<!DOCTYPE html>
     }
 
     body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-family: 'Tirra', -apple-system, BlinkMacSystemFont, sans-serif;
       background: linear-gradient(140deg, #fdfcff 0%, #f5f3ff 50%, #fdf4ff 100%);
       min-height: 100vh;
       color: var(--gray-900);
@@ -309,13 +52,13 @@ _HTML = """<!DOCTYPE html>
     }
     .logo {
       width: 2.25rem; height: 2.25rem; border-radius: .6rem; flex-shrink: 0;
-      background: linear-gradient(135deg, #7c3aed, #a855f7);
+      background: linear-gradient(135deg, #276db4, #169566);
       display: flex; align-items: center; justify-content: center;
     }
     .logo svg { color: #fff; }
     .brand-name { font-size: .9375rem; font-weight: 600; line-height: 1.2; }
     .brand-sub  { font-size: .75rem; color: var(--gray-400); }
-    .brand-sub .grad { background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .brand-sub .grad { background: linear-gradient(135deg, #276db4 0%, #169566 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
 
     /* ── Main ── */
     main { max-width: 860px; margin: 0 auto; padding: 3rem 1.5rem 5rem; }
@@ -334,7 +77,7 @@ _HTML = """<!DOCTYPE html>
       color: var(--gray-900); line-height: 1.2; margin-bottom: .75rem;
     }
     .hero h2 .grad {
-      background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%);
+      background: linear-gradient(135deg, #276db4 0%, #169566 100%);
       -webkit-background-clip: text; -webkit-text-fill-color: transparent;
       background-clip: text;
     }
@@ -418,7 +161,7 @@ _HTML = """<!DOCTYPE html>
     /* ── Search button ── */
     .search-btn {
       width: 100%; padding: .875rem 1.5rem; margin-top: 1.5rem;
-      background: linear-gradient(135deg, #7c3aed, #a855f7);
+      background: linear-gradient(135deg, #276db4, #169566);
       color: #fff; font-family: inherit; font-size: .9375rem; font-weight: 600;
       border: none; border-radius: .75rem; cursor: pointer;
       transition: transform .15s, box-shadow .15s, opacity .15s;
@@ -465,7 +208,7 @@ _HTML = """<!DOCTYPE html>
     .results-count { font-size: 1rem; font-weight: 600; color: var(--gray-900); }
     .results-count .num {
       font-size: 1.75rem; font-weight: 700; line-height: 1;
-      background: linear-gradient(135deg, #7c3aed, #a855f7);
+      background: linear-gradient(135deg, #276db4, #169566);
       -webkit-background-clip: text; -webkit-text-fill-color: transparent;
       background-clip: text; margin-right: .25rem;
     }
@@ -508,7 +251,7 @@ _HTML = """<!DOCTYPE html>
     .engine-badge.google { background: #e8f0fe; color: #1a56c4; }
     .engine-badge.yandex { background: #fde8e8; color: #c41a1a; }
     .engine-badge.bing   { background: #e8faf0; color: #1a7a46; }
-    .engine-badge.multi  { background: #f3e8ff; color: #7c3aed; }
+    .engine-badge.multi  { background: #f3e8ff; color: #276db4; }
     td {
       padding: .875rem 1rem; font-size: .875rem; color: var(--gray-700);
       vertical-align: middle; border-bottom: 1px solid var(--gray-50);
@@ -574,7 +317,7 @@ _HTML = """<!DOCTYPE html>
     .bulk-summary-text { font-size: 1rem; font-weight: 600; color: var(--gray-900); }
     .bulk-summary-text .num {
       font-size: 1.75rem; font-weight: 700; line-height: 1;
-      background: linear-gradient(135deg, #7c3aed, #a855f7);
+      background: linear-gradient(135deg, #276db4, #169566);
       -webkit-background-clip: text; -webkit-text-fill-color: transparent;
       background-clip: text; margin-right: .25rem;
     }
@@ -613,8 +356,8 @@ _HTML = """<!DOCTYPE html>
       </svg>
     </div>
     <div>
-      <div class="brand-name">Image Intelligence</div>
-      <div class="brand-sub">ISD · Reverse Image Search</div>
+      <div class="brand-name"><span class="grad">magpie</span></div>
+      <div class="brand-sub"><span class="grad">Mag</span>ic <span class="grad">P</span>icture <span class="grad">I</span>ntelligence <span class="grad">E</span>xporter</div>
     </div>
   </div>
 </header>
@@ -622,10 +365,10 @@ _HTML = """<!DOCTYPE html>
 <main>
 
   <!-- Hero -->
-  <div class="hero">
-    <div class="hero-img"><img src="HERO_IMAGE_PLACEHOLDER" alt=""></div>
+  <div class="hero hero--with-image">
+    <div class="hero-img"><img src="https://i.ibb.co/v6J9vxqV/magpie.png" alt=""></div>
     <div class="hero-text">
-      <h2>Find where <span class="grad">any image</span><br>appears online</h2>
+      <h2>Reverse search any image across Google, Yandex, and Bing with <span class="grad">magpie</span>.</span><br></h2>
       <p>Upload a photo or paste an image URL and magpie will reverse search it on Google, Yandex, and Bing to find all instances of it's use across the web. Download results per photo, or all results combined.</p>
     </div>
   </div>
@@ -1000,7 +743,8 @@ _HTML = """<!DOCTYPE html>
       const fd = new FormData();
       let resp, data;
       if (activeTab === 'url') {
-        const urls = document.getElementById('url-input').value.trim().split('\n').map(u => u.trim()).filter(Boolean);
+        const urls = document.getElementById('url-input').value.trim().split('
+').map(u => u.trim()).filter(Boolean);
         if (urls.length === 1) {
           fd.append('image_url', urls[0]);
           resp = await fetch('/api/search', { method: 'POST', body: fd });
@@ -1009,7 +753,8 @@ _HTML = """<!DOCTYPE html>
           searchId = data.search_id;
           renderResults(data.results, data.count);
         } else {
-          fd.append('urls', urls.join('\n'));
+          fd.append('urls', urls.join('
+'));
           resp = await fetch('/api/bulk-search', { method: 'POST', body: fd });
           data = await resp.json();
           if (!resp.ok) { showError(data.detail || 'An unexpected error occurred.'); return; }
@@ -1047,7 +792,7 @@ _HTML = """<!DOCTYPE html>
       results.forEach((r, i) => {
         const thumbCell = r.thumbnail
           ? `<img class="thumb-img" src="${h(r.thumbnail)}" alt="" loading="lazy"
-               onerror="this.outerHTML='<div class=thumb-empty><svg width=20 height=20 fill=none viewBox=\\'0 0 24 24\\' stroke=currentColor stroke-width=1.5><path stroke-linecap=round stroke-linejoin=round d=\\'M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M21 18.75H3.75A1.5 1.5 0 012.25 17.25V6.75A1.5 1.5 0 013.75 5.25h16.5A1.5 1.5 0 0121.75 6.75v10.5A1.5 1.5 0 0120.25 18.75z\\'/></svg></div>'">`
+               onerror="this.outerHTML='<div class=thumb-empty><svg width=20 height=20 fill=none viewBox=\'0 0 24 24\' stroke=currentColor stroke-width=1.5><path stroke-linecap=round stroke-linejoin=round d=\'M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M21 18.75H3.75A1.5 1.5 0 012.25 17.25V6.75A1.5 1.5 0 013.75 5.25h16.5A1.5 1.5 0 0121.75 6.75v10.5A1.5 1.5 0 0120.25 18.75z\'/></svg></div>'">`
           : `<div class="thumb-empty"><svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M21 18.75H3.75A1.5 1.5 0 012.25 17.25V6.75A1.5 1.5 0 013.75 5.25h16.5A1.5 1.5 0 0121.75 6.75v10.5A1.5 1.5 0 0120.25 18.75z"/></svg></div>`;
 
         const titleCell = r.url
@@ -1103,55 +848,4 @@ _HTML = """<!DOCTYPE html>
 
 </script>
 </body>
-</html>"""
-
-# ── Apply branding config ─────────────────────────────────────────────────────
-_logo_inner = (
-    f'<img src="{LOGO_URL}" alt="{BRAND_NAME}" '
-    f'style="width:100%;height:100%;object-fit:cover;border-radius:.6rem;">'
-    if LOGO_URL else
-    '<svg width="15" height="15" fill="none" viewBox="0 0 24 24" '
-    'stroke="currentColor" stroke-width="2.5">\n        '
-    '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>\n      </svg>'
-)
-
-_HTML = (
-    _HTML
-    # text
-    .replace("Image Intelligence · ISD",    f"{BRAND_NAME} · ISD")
-    .replace(">Image Intelligence<",        f">{BRAND_NAME}<")
-    .replace(">ISD · Reverse Image Search<", f">{BRAND_SUBTITLE}<")
-    .replace(
-        'Find where <span class="grad">any image</span><br>appears online',
-        HERO_HEADING,
-    )
-    .replace(
-        "Paste a URL or upload a file to search across the web, then export a full visual report in CSV, Excel, or HTML.",
-        HERO_SUBTEXT,
-    )
-    # logo
-    .replace(
-        '<svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">\n        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>\n      </svg>',
-        _logo_inner,
-    )
-    # colours
-    .replace("#7c3aed", COLOR_PRIMARY)
-    .replace("#8b5cf6", COLOR_SECONDARY)
-    .replace("#a855f7", COLOR_GRADIENT)
-    # font
-    .replace(
-        "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap",
-        FONT_URL,
-    )
-    .replace("'Inter',", f"'{FONT_NAME}',")
-)
-
-# hero image — swap in URL and activate the side-by-side layout if provided
-if HERO_IMAGE_URL:
-    _HTML = (
-        _HTML
-        .replace('<div class="hero">', '<div class="hero hero--with-image">')
-        .replace("HERO_IMAGE_PLACEHOLDER", HERO_IMAGE_URL)
-    )
-else:
-    _HTML = _HTML.replace("HERO_IMAGE_PLACEHOLDER", "")
+</html>
