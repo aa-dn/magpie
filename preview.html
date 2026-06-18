@@ -743,8 +743,7 @@
       const fd = new FormData();
       let resp, data;
       if (activeTab === 'url') {
-        const urls = document.getElementById('url-input').value.trim().split('
-').map(u => u.trim()).filter(Boolean);
+        const urls = document.getElementById('url-input').value.trim().split(/\r?\n/).map(u => u.trim()).filter(Boolean);
         if (urls.length === 1) {
           fd.append('image_url', urls[0]);
           resp = await fetch('/api/search', { method: 'POST', body: fd });
@@ -753,8 +752,7 @@
           searchId = data.search_id;
           renderResults(data.results, data.count);
         } else {
-          fd.append('urls', urls.join('
-'));
+          fd.append('urls', urls.join('\n'));
           resp = await fetch('/api/bulk-search', { method: 'POST', body: fd });
           data = await resp.json();
           if (!resp.ok) { showError(data.detail || 'An unexpected error occurred.'); return; }
