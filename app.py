@@ -1481,6 +1481,7 @@ _HTML = """<!DOCTYPE html>
   function setLoading(on) {
     const isBulk = activeTab === 'bulk';
     document.getElementById('loading').classList.toggle('show', on);
+    if (on) document.getElementById('loading').scrollIntoView({behavior: 'smooth', block: 'center'});
     document.querySelector('.loading p').textContent = isBulk ? `Searching ${bulkFiles.length} images across 3 engines…` : 'Searching the web…';
     const btn = document.getElementById(isBulk ? 'bulk-search-btn' : 'search-btn');
     if (!btn) return;
