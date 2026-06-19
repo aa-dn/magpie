@@ -152,7 +152,9 @@ async def search(
             filename = f"input{suffix}"
             img_path = work_dir / filename
             img_path.write_bytes(content)
-            search_url = str(request.base_url) + f"uploads/{search_id}/{filename}"
+            scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+            host   = request.headers.get("host", request.url.netloc)
+            search_url = f"{scheme}://{host}/uploads/{search_id}/{filename}"
             source_label = file.filename
         elif image_url and image_url.strip():
             search_url = image_url.strip()
@@ -273,7 +275,9 @@ async def bulk_search(
             suffix = Path(file.filename).suffix or ".jpg"
             filename = f"input{suffix}"
             (work_dir / filename).write_bytes(content)
-            public_url = str(request.base_url) + f"uploads/{search_id}/{filename}"
+            scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+            host   = request.headers.get("host", request.url.netloc)
+            public_url = f"{scheme}://{host}/uploads/{search_id}/{filename}"
             targets.append((search_id, work_dir, public_url, file.filename))
 
     for url in [u.strip() for u in urls.splitlines() if u.strip()][:max(0, 5 - len(targets))]:
