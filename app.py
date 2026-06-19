@@ -585,6 +585,29 @@ _HTML = """<!DOCTYPE html>
       transition: border-color .15s, color .15s, background .15s;
     }
     .new-search-btn:hover { border-color: var(--gray-400); color: var(--gray-700); background: var(--gray-50); }
+    .search-footer { margin-top: 1rem; display: flex; flex-direction: column; gap: .6rem; }
+    .count-picker { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .count-picker-label { font-size: .78rem; color: rgba(255,255,255,.65); }
+    .count-pill input { display: none; }
+    .count-pill span {
+      display: inline-block; padding: 4px 11px; border-radius: 999px; cursor: pointer;
+      font-size: .78rem; font-weight: 500; border: 1.5px solid rgba(255,255,255,.3);
+      color: rgba(255,255,255,.65); background: rgba(255,255,255,.07);
+      transition: background .15s, border-color .15s, color .15s; user-select: none;
+    }
+    .count-pill span em { font-style: normal; opacity: .7; font-size: .72rem; }
+    .count-pill input:checked + span { background: rgba(255,255,255,.2); border-color: rgba(255,255,255,.75); color: #fff; }
+    .count-pill input:checked + span em { opacity: 1; }
+    .credit-note { font-size: .72rem; color: rgba(255,255,255,.5); text-align: center; }
+    #results-tbody tr.filtered-out { display: none; }
+    .filter-toggle {
+      font-size: .78rem; padding: 3px 10px; border-radius: 6px;
+      border: 1px solid var(--gray-200); background: #fff; cursor: pointer;
+      color: var(--gray-600); display: inline-flex; align-items: center; gap: 5px;
+      transition: border-color .15s, background .15s, color .15s;
+    }
+    .filter-toggle:hover { border-color: var(--gray-300); background: var(--gray-50); }
+    .filter-toggle.active { border-color: var(--brand); background: var(--brand-50); color: var(--brand); font-weight: 600; }
     #credit-widget {
       position: fixed; bottom: 16px; left: 16px; z-index: 200;
       display: flex; align-items: center; gap: 6px;
@@ -851,12 +874,21 @@ _HTML = """<!DOCTYPE html>
       <div class="bulk-file-list" id="bulk-file-list"></div>
     </div>
 
-    <button class="search-btn" id="search-btn" onclick="doSearch()">
-      <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
-        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-      </svg>
-      Search
-    </button>
+    <div class="search-footer">
+      <div class="count-picker">
+        <span class="count-picker-label">Results per search:</span>
+        <label class="count-pill"><input type="radio" name="result-pages" value="1" checked onchange="updateCreditNote()"><span>59 · <em>1 credit</em></span></label>
+        <label class="count-pill"><input type="radio" name="result-pages" value="2" onchange="updateCreditNote()"><span>~120 · <em>2 credits</em></span></label>
+        <label class="count-pill"><input type="radio" name="result-pages" value="3" onchange="updateCreditNote()"><span>~180 · <em>3 credits</em></span></label>
+      </div>
+      <button class="search-btn" id="search-btn" onclick="doSearch()">
+        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+          <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+        </svg>
+        Search
+      </button>
+      <p class="credit-note" id="credit-note">Uses 1 SerpAPI credit per search</p>
+    </div>
   </div>
 
   <!-- Loading -->
@@ -912,6 +944,10 @@ _HTML = """<!DOCTYPE html>
       <button class="sel-btn" onclick="toggleAllMain(true)">Select all</button>
       <button class="sel-btn" onclick="toggleAllMain(false)">Select none</button>
       <span class="sel-count" id="main-sel-count">0 selected</span>
+      <button class="filter-toggle" id="social-filter-btn" onclick="toggleSocialFilter()">
+        <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 01-.659 1.591l-5.432 5.432a2.25 2.25 0 00-.659 1.591v2.927a2.25 2.25 0 01-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 00-.659-1.591L3.659 7.409A2.25 2.25 0 013 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0112 3z"/></svg>
+        Social media only
+      </button>
       <button class="sel-export" onclick="exportSelected('main','csv')">↓ CSV</button>
       <button class="sel-export" onclick="exportSelected('main','xlsx')">↓ Excel</button>
       <button class="sel-export" onclick="exportSelected('main','html')">↓ HTML</button>
@@ -993,6 +1029,13 @@ _HTML = """<!DOCTYPE html>
   let _searchUrl = null;
   let _searchStart = 0;
   const _PAGE_SIZE = 59;
+  let _maxPages = 1;
+  let _socialFilter = false;
+  const _SOCIAL_DOMAINS = [
+    'instagram','facebook','twitter','x.com','tiktok','reddit','youtube',
+    'linkedin','pinterest','tumblr','snapchat','vk.com','weibo','flickr',
+    'imgur','telegram','twitch','whatsapp','discord','threads','bluesky','mastodon'
+  ];
 
   // ── Tab switching ──────────────────────────────────────────────────────────
   function switchTab(tab) {
@@ -1238,6 +1281,7 @@ _HTML = """<!DOCTYPE html>
           if (!resp.ok) { showError(data.detail || 'An unexpected error occurred.'); return; }
           searchId = data.search_id; _searchUrl = data.search_url; _searchStart = 0;
           renderResults(data.results, data.count, data.engine_errors || {});
+          if (data.count >= _PAGE_SIZE && getMaxPages() > 1) await autoFetchPages(_searchUrl, getMaxPages());
         } else {
           fd.append('urls', urls.join('\\n'));
           resp = await fetch('/api/bulk-search', { method: 'POST', body: fd });
@@ -1252,6 +1296,7 @@ _HTML = """<!DOCTYPE html>
         if (!resp.ok) { showError(data.detail || 'An unexpected error occurred.'); return; }
         searchId = data.search_id; _searchUrl = data.search_url; _searchStart = 0;
         renderResults(data.results, data.count, data.engine_errors || {});
+        if (data.count >= _PAGE_SIZE && getMaxPages() > 1) await autoFetchPages(_searchUrl, getMaxPages());
       }
     } catch {
       showError('Network error — please check your connection and try again.');
@@ -1296,7 +1341,7 @@ _HTML = """<!DOCTYPE html>
 
   function checkLoadMore(pageCount) {
     const wrap = document.getElementById('load-more-wrap');
-    if (wrap) wrap.style.display = pageCount >= _PAGE_SIZE ? '' : 'none';
+    if (wrap) wrap.style.display = pageCount >= _PAGE_SIZE ? 'block' : 'none';
   }
 
   function renderResults(results, count, engineErrors) {
@@ -1317,9 +1362,31 @@ _HTML = """<!DOCTYPE html>
       results.forEach((r, i) => tbody.appendChild(makeResultRow(r, i)));
     }
 
-    updateMainCount();
+    applyFilter();
     checkLoadMore(count);
     document.getElementById('results').classList.add('show');
+  }
+
+  async function autoFetchPages(searchUrl, totalPages) {
+    for (let page = 1; page < totalPages; page++) {
+      try {
+        const fd = new FormData();
+        fd.append('search_url', searchUrl);
+        fd.append('start', page * _PAGE_SIZE);
+        const resp = await fetch('/api/search-more', {method: 'POST', body: fd});
+        const data = await resp.json();
+        if (!resp.ok || !data.results.length) break;
+        _searchStart = page * _PAGE_SIZE;
+        const startIdx = _singleResults.length;
+        _singleResults = _singleResults.concat(data.results);
+        document.getElementById('result-num').textContent = _singleResults.length;
+        const tbody = document.getElementById('results-tbody');
+        data.results.forEach((r, i) => tbody.appendChild(makeResultRow(r, startIdx + i)));
+        applyFilter();
+        checkLoadMore(data.count);
+      } catch { break; }
+    }
+    refreshCredits();
   }
 
   async function loadMore() {
@@ -1340,7 +1407,7 @@ _HTML = """<!DOCTYPE html>
       document.getElementById('result-num').textContent = _singleResults.length;
       const tbody = document.getElementById('results-tbody');
       data.results.forEach((r, i) => tbody.appendChild(makeResultRow(r, startIdx + i)));
-      updateMainCount();
+      applyFilter();
       checkLoadMore(data.count);
     } catch {
       showError('Network error — could not load more results.');
@@ -1353,15 +1420,15 @@ _HTML = """<!DOCTYPE html>
 
   // ── Selection helpers ──────────────────────────────────────────────────────
   function toggleAllMain(checked) {
-    document.querySelectorAll('#results-tbody .result-cb').forEach(cb => cb.checked = checked);
+    document.querySelectorAll('#results-tbody tr[data-idx]:not(.filtered-out) .result-cb').forEach(cb => cb.checked = checked);
     const hdr = document.getElementById('sel-all-main');
     if (hdr) hdr.checked = checked;
     updateMainCount();
   }
 
   function updateMainCount() {
-    const all  = document.querySelectorAll('#results-tbody .result-cb');
-    const on   = document.querySelectorAll('#results-tbody .result-cb:checked');
+    const all = [...document.querySelectorAll('#results-tbody tr[data-idx]:not(.filtered-out) .result-cb')];
+    const on  = all.filter(cb => cb.checked);
     document.getElementById('main-sel-count').textContent = `${on.length} of ${all.length} selected`;
     const hdr = document.getElementById('sel-all-main');
     if (hdr) hdr.indeterminate = on.length > 0 && on.length < all.length;
@@ -1382,7 +1449,7 @@ _HTML = """<!DOCTYPE html>
   async function exportSelected(scope, fmt) {
     let results = [];
     if (scope === 'main') {
-      document.querySelectorAll('#results-tbody tr[data-idx]').forEach(row => {
+      document.querySelectorAll('#results-tbody tr[data-idx]:not(.filtered-out)').forEach(row => {
         if (row.querySelector('.result-cb')?.checked)
           results.push(_singleResults[parseInt(row.dataset.idx)]);
       });
@@ -1441,6 +1508,38 @@ _HTML = """<!DOCTYPE html>
     return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
 
+  // ── Result count / credit note ─────────────────────────────────────────────
+  function getMaxPages() {
+    const el = document.querySelector('input[name="result-pages"]:checked');
+    return el ? parseInt(el.value) : 1;
+  }
+
+  function updateCreditNote() {
+    _maxPages = getMaxPages();
+    const el = document.getElementById('credit-note');
+    if (el) el.textContent = `Uses ${_maxPages} SerpAPI credit${_maxPages > 1 ? 's' : ''} per search`;
+  }
+
+  // ── Social media filter ────────────────────────────────────────────────────
+  function isSocial(r) {
+    const text = ((r.source || '') + ' ' + (r.url || '')).toLowerCase();
+    return _SOCIAL_DOMAINS.some(d => text.includes(d));
+  }
+
+  function applyFilter() {
+    document.querySelectorAll('#results-tbody tr[data-idx]').forEach(row => {
+      const r = _singleResults[parseInt(row.dataset.idx)];
+      row.classList.toggle('filtered-out', _socialFilter && !!r && !isSocial(r));
+    });
+    updateMainCount();
+  }
+
+  function toggleSocialFilter() {
+    _socialFilter = !_socialFilter;
+    document.getElementById('social-filter-btn').classList.toggle('active', _socialFilter);
+    applyFilter();
+  }
+
   // ── Credit counter ─────────────────────────────────────────────────────────
   async function refreshCredits() {
     try {
@@ -1469,6 +1568,10 @@ _HTML = """<!DOCTYPE html>
     bulkSearchIds  = [];
     _searchUrl     = null;
     _searchStart   = 0;
+    _socialFilter  = false;
+    _maxPages      = getMaxPages();
+    const sfb = document.getElementById('social-filter-btn');
+    if (sfb) sfb.classList.remove('active');
     const lmw = document.getElementById('load-more-wrap');
     if (lmw) lmw.style.display = 'none';
     document.getElementById('results-tbody').innerHTML = '';
