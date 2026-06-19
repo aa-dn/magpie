@@ -45,58 +45,65 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Reverse Image Search")
-        self.minsize(680, 560)
+        self.minsize(720, 760)
         self.resizable(True, True)
 
-        # Use a more modern theme on Windows
         style = ttk.Style(self)
         for theme in ("vista", "winnative", "clam"):
             if theme in style.theme_names():
                 style.theme_use(theme)
                 break
 
-        style.configure("Header.TLabel", font=("Segoe UI", 13, "bold"))
+        style.configure("Header.TLabel",  font=("Segoe UI", 13, "bold"))
         style.configure("Section.TLabel", font=("Segoe UI", 9, "bold"), foreground="#555")
-        style.configure("Run.TButton", font=("Segoe UI", 10, "bold"), padding=6)
+        style.configure("Run.TButton",    font=("Segoe UI", 10, "bold"), padding=6)
+        style.configure("ColHeader.TLabel", font=("Segoe UI", 8, "bold"), foreground="#555")
 
         self._config = load_config()
+        self._results = []
+        self._result_vars = []
+        self._source_label = ""
+        self._file_paths = []          # ordered list of absolute paths
         self._build_ui()
         self._restore_saved()
 
     # ── UI Construction ────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        pad = {"padx": 16, "pady": 6}
+        pad = {"padx": 16, "pady": 5}
 
         root_frame = ttk.Frame(self)
         root_frame.pack(fill="both", expand=True)
         root_frame.columnconfigure(1, weight=1)
+        # Only the results panel row expands; everything above is fixed height.
 
         r = 0
 
         # ── Header ──
         ttk.Label(root_frame, text="Reverse Image Search", style="Header.TLabel").grid(
-            row=r, column=0, columnspan=3, sticky="w", padx=16, pady=(14, 2)
+            row=r, column=0, columnspan=3, sticky="w", padx=16, pady=(12, 2)
         )
         r += 1
         ttk.Label(
             root_frame,
             text="Find everywhere an image appears online, then export a visual report.",
             foreground="#666",
-        ).grid(row=r, column=0, columnspan=3, sticky="w", padx=16, pady=(0, 10))
+        ).grid(row=r, column=0, columnspan=3, sticky="w", padx=16, pady=(0, 8))
         r += 1
         ttk.Separator(root_frame, orient="horizontal").grid(
             row=r, column=0, columnspan=3, sticky="ew", padx=16, pady=2
         )
         r += 1
 
-        # ── Input image ──
+        # ── Image input ──
         ttk.Label(root_frame, text="IMAGE INPUT", style="Section.TLabel").grid(
             row=r, column=0, columnspan=3, sticky="w", **pad
         )
         r += 1
 
-        ttk.Label(root_frame, text="Image URL").grid(row=r, column=0, sticky="w", padx=(16, 8), pady=4)
+        ttk.Label(root_frame, text="Image URL").grid(
+            row=r, column=0, sticky="w", padx=(16, 8), pady=4
+        )
         self.url_var = tk.StringVar()
         ttk.Entry(root_frame, textvariable=self.url_var).grid(
             row=r, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=4
@@ -108,17 +115,37 @@ class App(tk.Tk):
         )
         r += 1
 
-        ttk.Label(root_frame, text="Local image file").grid(
-            row=r, column=0, sticky="w", padx=(16, 8), pady=4
+        # Multi-file input: Listbox (fixed height=4) + action buttons
+        ttk.Label(root_frame, text="Local image files").grid(
+            row=r, column=0, sticky="nw", padx=(16, 8), pady=(6, 2)
         )
-        self.file_var = tk.StringVar()
-        file_row = ttk.Frame(root_frame)
-        file_row.grid(row=r, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=4)
-        file_row.columnconfigure(0, weight=1)
-        ttk.Entry(file_row, textvariable=self.file_var).grid(row=0, column=0, sticky="ew")
-        ttk.Button(file_row, text="Browse…", command=self._browse_image).grid(
-            row=0, column=1, padx=(6, 0)
+
+        file_area = ttk.Frame(root_frame)
+        file_area.grid(row=r, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=(4, 2))
+        file_area.columnconfigure(0, weight=1)
+
+        lb_frame = ttk.Frame(file_area)
+        lb_frame.grid(row=0, column=0, sticky="ew")
+        lb_frame.columnconfigure(0, weight=1)
+
+        self._file_listbox = tk.Listbox(
+            lb_frame, height=4, selectmode=tk.EXTENDED,
+            font=("Segoe UI", 9), activestyle="none",
+            relief="sunken", borderwidth=1,
         )
+        lb_vsb = ttk.Scrollbar(lb_frame, orient="vertical", command=self._file_listbox.yview)
+        self._file_listbox.configure(yscrollcommand=lb_vsb.set)
+        self._file_listbox.grid(row=0, column=0, sticky="ew")
+        lb_vsb.grid(row=0, column=1, sticky="ns")
+
+        lb_btns = ttk.Frame(file_area)
+        lb_btns.grid(row=1, column=0, sticky="w", pady=(4, 0))
+        ttk.Button(lb_btns, text="Add files…",       command=self._browse_images).pack(side="left", padx=(0, 6))
+        ttk.Button(lb_btns, text="Remove selected",  command=self._remove_selected_files).pack(side="left", padx=(0, 6))
+        ttk.Button(lb_btns, text="Clear all",        command=self._clear_files).pack(side="left")
+
+        ttk.Label(file_area, text="Tip: hold Ctrl or Shift in the dialog to pick multiple files at once.",
+                  foreground="#999", font=("Segoe UI", 8)).grid(row=2, column=0, sticky="w", pady=(3, 0))
         r += 1
 
         ttk.Separator(root_frame, orient="horizontal").grid(
@@ -146,9 +173,9 @@ class App(tk.Tk):
         r += 1
 
         self._save_key = tk.BooleanVar(value=True)
-        ttk.Checkbutton(root_frame, text="Remember key on this computer", variable=self._save_key).grid(
-            row=r, column=1, sticky="w", padx=(0, 16), pady=(0, 6)
-        )
+        ttk.Checkbutton(
+            root_frame, text="Remember key on this computer", variable=self._save_key
+        ).grid(row=r, column=1, sticky="w", padx=(0, 16), pady=(0, 4))
         r += 1
 
         ttk.Separator(root_frame, orient="horizontal").grid(
@@ -192,9 +219,9 @@ class App(tk.Tk):
         self._do_csv   = tk.BooleanVar(value=True)
         self._do_excel = tk.BooleanVar(value=True)
         self._do_html  = tk.BooleanVar(value=True)
-        ttk.Checkbutton(fmt_row, text="CSV",                        variable=self._do_csv).pack(side="left", padx=(0, 14))
-        ttk.Checkbutton(fmt_row, text="Excel (with thumbnails)",    variable=self._do_excel).pack(side="left", padx=(0, 14))
-        ttk.Checkbutton(fmt_row, text="HTML (view in browser)",     variable=self._do_html).pack(side="left")
+        ttk.Checkbutton(fmt_row, text="CSV",                     variable=self._do_csv).pack(side="left", padx=(0, 14))
+        ttk.Checkbutton(fmt_row, text="Excel (with thumbnails)", variable=self._do_excel).pack(side="left", padx=(0, 14))
+        ttk.Checkbutton(fmt_row, text="HTML (view in browser)",  variable=self._do_html).pack(side="left")
         r += 1
 
         ttk.Separator(root_frame, orient="horizontal").grid(
@@ -209,6 +236,10 @@ class App(tk.Tk):
             btn_row, text="  Search  ", style="Run.TButton", command=self._run_search
         )
         self._search_btn.pack(side="left")
+        self._export_btn = ttk.Button(
+            btn_row, text="Export Selected", command=self._export_selected, state="disabled"
+        )
+        self._export_btn.pack(side="left", padx=(12, 0))
         self._open_btn = ttk.Button(
             btn_row, text="Open results folder", command=self._open_outdir, state="disabled"
         )
@@ -216,21 +247,59 @@ class App(tk.Tk):
         r += 1
 
         # ── Progress log ──
-        ttk.Label(root_frame, text="Progress", style="Section.TLabel").grid(
-            row=r, column=0, columnspan=3, sticky="w", padx=16
-        )
-        r += 1
         self._log_widget = scrolledtext.ScrolledText(
-            root_frame, height=9, state="disabled",
+            root_frame, height=3, state="disabled",
             font=("Consolas", 9), bg="#1e1e1e", fg="#d4d4d4",
             insertbackground="white", relief="flat",
         )
         self._log_widget.grid(
-            row=r, column=0, columnspan=3, sticky="nsew", padx=16, pady=(2, 12)
+            row=r, column=0, columnspan=3, sticky="ew", padx=16, pady=(0, 4)
         )
+        r += 1
+
+        # ── Results section (only this row expands) ──
+        results_outer = ttk.LabelFrame(root_frame, text="Results — tick the rows you want to export")
+        results_outer.grid(row=r, column=0, columnspan=3, sticky="nsew", padx=16, pady=(0, 10))
+        results_outer.columnconfigure(0, weight=1)
+        results_outer.rowconfigure(1, weight=1)
         root_frame.rowconfigure(r, weight=1)
 
-    # ── Saved config helpers ───────────────────────────────────────────────────
+        ctrl_row = ttk.Frame(results_outer)
+        ctrl_row.grid(row=0, column=0, sticky="w", padx=6, pady=(4, 2))
+        ttk.Button(ctrl_row, text="Select all",  command=self._select_all).pack(side="left", padx=(0, 6))
+        ttk.Button(ctrl_row, text="Select none", command=self._select_none).pack(side="left")
+        self._result_count_label = ttk.Label(ctrl_row, text="No results yet", foreground="#888")
+        self._result_count_label.pack(side="left", padx=(14, 0))
+
+        container = ttk.Frame(results_outer)
+        container.grid(row=1, column=0, sticky="nsew", padx=4, pady=(0, 4))
+        container.columnconfigure(0, weight=1)
+        container.rowconfigure(0, weight=1)
+
+        self._canvas = tk.Canvas(container, bg="#f8f8f8", highlightthickness=0)
+        vsb = ttk.Scrollbar(container, orient="vertical", command=self._canvas.yview)
+        self._canvas.configure(yscrollcommand=vsb.set)
+        self._canvas.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+
+        self._rows_frame = ttk.Frame(self._canvas)
+        self._canvas_window = self._canvas.create_window((0, 0), window=self._rows_frame, anchor="nw")
+
+        self._rows_frame.bind("<Configure>", self._on_rows_configure)
+        self._canvas.bind("<Configure>",     self._on_canvas_configure)
+        self._canvas.bind("<MouseWheel>",    self._on_mousewheel)
+        self._rows_frame.bind("<MouseWheel>", self._on_mousewheel)
+
+    def _on_rows_configure(self, event):
+        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+
+    def _on_canvas_configure(self, event):
+        self._canvas.itemconfig(self._canvas_window, width=event.width)
+
+    def _on_mousewheel(self, event):
+        self._canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    # ── Config helpers ─────────────────────────────────────────────────────────
 
     def _restore_saved(self):
         if "api_key" in self._config:
@@ -238,19 +307,36 @@ class App(tk.Tk):
         if "output_dir" in self._config:
             self.outdir_var.set(self._config["output_dir"])
 
-    # ── Browse helpers ─────────────────────────────────────────────────────────
+    # ── Browse / file list helpers ─────────────────────────────────────────────
 
-    def _browse_image(self):
-        path = filedialog.askopenfilename(
-            title="Select image file",
+    def _browse_images(self):
+        paths = filedialog.askopenfilenames(
+            title="Select image files (Ctrl+click for multiple)",
             filetypes=[
                 ("Images", "*.jpg *.jpeg *.png *.gif *.webp *.bmp *.tiff"),
                 ("All files", "*.*"),
             ],
         )
-        if path:
-            self.file_var.set(path)
-            self.url_var.set("")
+        if paths:
+            added = 0
+            for p in paths:
+                if p not in self._file_paths:
+                    self._file_paths.append(p)
+                    self._file_listbox.insert("end", os.path.basename(p))
+                    added += 1
+            if added:
+                self.url_var.set("")
+                # Scroll listbox to show the last added item
+                self._file_listbox.see("end")
+
+    def _remove_selected_files(self):
+        for i in reversed(self._file_listbox.curselection()):
+            self._file_listbox.delete(i)
+            del self._file_paths[i]
+
+    def _clear_files(self):
+        self._file_paths.clear()
+        self._file_listbox.delete(0, "end")
 
     def _browse_outdir(self):
         path = filedialog.askdirectory(title="Choose folder to save results")
@@ -275,27 +361,207 @@ class App(tk.Tk):
         self._log_widget.delete("1.0", "end")
         self._log_widget.config(state="disabled")
 
+    # ── Results display ────────────────────────────────────────────────────────
+
+    def _show_results(self, results: list):
+        self._results = results
+        self._result_vars = []
+
+        for w in self._rows_frame.winfo_children():
+            w.destroy()
+
+        if not results:
+            self._result_count_label.config(text="No results")
+            self._export_btn.config(state="disabled")
+            return
+
+        has_source = any(r.get("source_image") for r in results)
+        n_cols = 6 if has_source else 5
+
+        self._rows_frame.columnconfigure(2, weight=1)
+        self._rows_frame.columnconfigure(3, weight=2)
+
+        # Headers
+        ttk.Label(self._rows_frame, text="",       width=2).grid(row=0, column=0, padx=(4, 0))
+        ttk.Label(self._rows_frame, text="#",      width=3, style="ColHeader.TLabel").grid(row=0, column=1, sticky="w", padx=4)
+        ttk.Label(self._rows_frame, text="Title",           style="ColHeader.TLabel").grid(row=0, column=2, sticky="w", padx=4)
+        ttk.Label(self._rows_frame, text="URL",             style="ColHeader.TLabel").grid(row=0, column=3, sticky="w", padx=4)
+        ttk.Label(self._rows_frame, text="Source",          style="ColHeader.TLabel").grid(row=0, column=4, sticky="w", padx=4)
+        if has_source:
+            ttk.Label(self._rows_frame, text="From", style="ColHeader.TLabel").grid(row=0, column=5, sticky="w", padx=4)
+
+        ttk.Separator(self._rows_frame, orient="horizontal").grid(
+            row=1, column=0, columnspan=n_cols, sticky="ew", pady=2
+        )
+
+        for i, result in enumerate(results):
+            row = i + 2
+
+            var = tk.BooleanVar(value=True)
+            self._result_vars.append(var)
+
+            cb = ttk.Checkbutton(self._rows_frame, variable=var, command=self._update_result_count)
+            cb.grid(row=row, column=0, padx=(6, 0), pady=1, sticky="w")
+            cb.bind("<MouseWheel>", self._on_mousewheel)
+
+            ttk.Label(self._rows_frame, text=str(i + 1), foreground="#888", width=3).grid(
+                row=row, column=1, sticky="w", padx=4, pady=1
+            )
+
+            title = result.get("title", "") or "—"
+            if len(title) > 60:
+                title = title[:57] + "…"
+            t = ttk.Label(self._rows_frame, text=title, anchor="w")
+            t.grid(row=row, column=2, sticky="ew", padx=4, pady=1)
+            t.bind("<MouseWheel>", self._on_mousewheel)
+
+            url = result.get("url", "") or "—"
+            url_display = url if len(url) <= 80 else url[:77] + "…"
+            u = ttk.Label(self._rows_frame, text=url_display, foreground="#1a0dab", anchor="w")
+            u.grid(row=row, column=3, sticky="ew", padx=4, pady=1)
+            u.bind("<MouseWheel>", self._on_mousewheel)
+
+            source = result.get("source", "") or "—"
+            if len(source) > 25:
+                source = source[:22] + "…"
+            s = ttk.Label(self._rows_frame, text=source, foreground="#555", width=20)
+            s.grid(row=row, column=4, sticky="w", padx=(4, 8), pady=1)
+            s.bind("<MouseWheel>", self._on_mousewheel)
+
+            if has_source:
+                from_text = result.get("source_image", "") or "—"
+                if len(from_text) > 28:
+                    from_text = from_text[:25] + "…"
+                f = ttk.Label(self._rows_frame, text=from_text, foreground="#555", width=24)
+                f.grid(row=row, column=5, sticky="w", padx=(4, 8), pady=1)
+                f.bind("<MouseWheel>", self._on_mousewheel)
+
+        self._update_result_count()
+        self._export_btn.config(state="normal")
+
+    def _select_all(self):
+        for var in self._result_vars:
+            var.set(True)
+        self._update_result_count()
+
+    def _select_none(self):
+        for var in self._result_vars:
+            var.set(False)
+        self._update_result_count()
+
+    def _update_result_count(self):
+        if not self._result_vars:
+            self._result_count_label.config(text="No results yet")
+            return
+        n = sum(1 for v in self._result_vars if v.get())
+        total = len(self._result_vars)
+        self._result_count_label.config(text=f"{n} of {total} selected")
+
     # ── Search ─────────────────────────────────────────────────────────────────
 
     def _run_search(self):
-        url        = self.url_var.get().strip()
-        local_file = self.file_var.get().strip()
-        api_key    = self.key_var.get().strip()
-        outdir     = self.outdir_var.get().strip()
-        prefix     = self.prefix_var.get().strip() or "results"
+        url     = self.url_var.get().strip()
+        files   = self._file_paths.copy()
+        api_key = self.key_var.get().strip()
 
-        if not url and not local_file:
-            messagebox.showerror("Missing input", "Please paste an image URL or choose a local file.")
+        if not url and not files:
+            messagebox.showerror("Missing input", "Please paste an image URL or add local files.")
             return
-        if url and local_file:
-            messagebox.showerror(
-                "Ambiguous input",
-                "Please provide either a URL or a local file — not both.",
-            )
+        if url and files:
+            messagebox.showerror("Ambiguous input", "Please use a URL or local files — not both.")
             return
         if not api_key:
             messagebox.showerror("Missing API key", "Please enter your SerpAPI key.")
             return
+
+        if self._save_key.get():
+            self._config["api_key"] = api_key
+            save_config(self._config)
+
+        self._clear_log()
+        self._search_btn.config(state="disabled")
+        self._export_btn.config(state="disabled")
+        self._open_btn.config(state="disabled")
+
+        for w in self._rows_frame.winfo_children():
+            w.destroy()
+        self._results = []
+        self._result_vars = []
+        n = len(files) if files else 1
+        self._result_count_label.config(
+            text=f"Searching {n} image{'s' if n > 1 else ''}…"
+        )
+
+        threading.Thread(
+            target=self._worker,
+            args=(url or None, files or None, api_key),
+            daemon=True,
+        ).start()
+
+    def _worker(self, url, files, api_key):
+        if url:
+            sources = [("url", url)]
+            self._source_label = url
+        else:
+            sources = [("file", f) for f in files]
+            self._source_label = ", ".join(os.path.basename(f) for f in files)
+
+        multi = len(sources) > 1
+        all_results = []
+
+        try:
+            for i, (kind, src) in enumerate(sources, 1):
+                label = os.path.basename(src) if kind == "file" else src
+                prefix = f"[{i}/{len(sources)}] " if multi else ""
+                self.after(0, self._log, f"{prefix}Searching: {label}")
+
+                if kind == "file":
+                    data = upload_and_search(src, api_key)
+                else:
+                    data = search_reverse_image(src, api_key)
+
+                results = parse_results(data)
+
+                if multi:
+                    for res in results:
+                        res["source_image"] = os.path.basename(src)
+
+                all_results.extend(results)
+                self.after(0, self._log, f"  → {len(results)} result{'s' if len(results) != 1 else ''}")
+
+            if not all_results:
+                self.after(0, self._log, "\nNo results returned.")
+                self.after(0, lambda: self._result_count_label.config(text="No results"))
+                return
+
+            total = len(all_results)
+            msg = f"\nFound {total} result{'s' if total != 1 else ''}"
+            if multi:
+                msg += f" across {len(sources)} images"
+            msg += ". Tick the ones you want, then click 'Export Selected'."
+            self.after(0, self._log, msg)
+            self.after(0, self._show_results, all_results)
+
+        except Exception as e:
+            self.after(0, self._log, f"\nError: {e}")
+            self.after(0, self._log, traceback.format_exc())
+            self.after(0, lambda: self._result_count_label.config(text="Error — see log"))
+
+        finally:
+            self.after(0, lambda: self._search_btn.config(state="normal"))
+
+    # ── Export ─────────────────────────────────────────────────────────────────
+
+    def _export_selected(self):
+        selected = [r for r, v in zip(self._results, self._result_vars) if v.get()]
+
+        if not selected:
+            messagebox.showerror("Nothing selected", "Please tick at least one result to export.")
+            return
+
+        outdir = self.outdir_var.get().strip()
+        prefix = self.prefix_var.get().strip() or "results"
+
         if not outdir or not os.path.isdir(outdir):
             messagebox.showerror("Invalid folder", "Please choose a valid output folder.")
             return
@@ -303,42 +569,20 @@ class App(tk.Tk):
             messagebox.showerror("No format selected", "Please select at least one export format.")
             return
 
-        if self._save_key.get():
-            self._config["api_key"]    = api_key
-            self._config["output_dir"] = outdir
-            save_config(self._config)
+        self._config["output_dir"] = outdir
+        save_config(self._config)
 
-        self._clear_log()
-        self._search_btn.config(state="disabled")
+        self._export_btn.config(state="disabled")
         self._open_btn.config(state="disabled")
 
         threading.Thread(
-            target=self._worker,
-            args=(url or None, local_file or None, api_key, outdir, prefix),
+            target=self._export_worker,
+            args=(selected, outdir, prefix),
             daemon=True,
         ).start()
 
-    def _worker(self, url, local_file, api_key, outdir, prefix):
-        source_label = url or local_file
+    def _export_worker(self, results, outdir, prefix):
         try:
-            self.after(0, self._log, f"Searching for: {source_label}\n")
-
-            if local_file:
-                self.after(0, self._log, "Uploading local file to SerpAPI (Google Lens)…")
-                data = upload_and_search(local_file, api_key)
-            else:
-                self.after(0, self._log, "Querying SerpAPI (Google Reverse Image Search)…")
-                data = search_reverse_image(url, api_key)
-
-            results = parse_results(data)
-
-            if not results:
-                self.after(0, self._log, "No results returned.")
-                self.after(0, self._log, "The image may not be publicly indexed, or the URL may be inaccessible to Google.")
-                return
-
-            self.after(0, self._log, f"Found {len(results)} results.\n")
-
             out_prefix = os.path.join(outdir, prefix)
 
             if self._do_csv.get():
@@ -354,18 +598,18 @@ class App(tk.Tk):
 
             if self._do_html.get():
                 path = f"{out_prefix}.html"
-                export_html(results, path, source_label)
+                export_html(results, path, self._source_label)
                 self.after(0, self._log, f"HTML saved:  {path}")
 
-            self.after(0, self._log, "\nAll done. Click 'Open results folder' to view your files.")
+            self.after(0, self._log, f"\nExported {len(results)} results. Click 'Open results folder' to view.")
             self.after(0, lambda: self._open_btn.config(state="normal"))
 
         except Exception as e:
-            self.after(0, self._log, f"\nError: {e}")
+            self.after(0, self._log, f"\nExport error: {e}")
             self.after(0, self._log, traceback.format_exc())
 
         finally:
-            self.after(0, lambda: self._search_btn.config(state="normal"))
+            self.after(0, lambda: self._export_btn.config(state="normal"))
 
 
 if __name__ == "__main__":
