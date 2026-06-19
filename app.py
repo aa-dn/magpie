@@ -122,7 +122,7 @@ async def search(
         else:
             raise HTTPException(400, "Provide an image URL or upload a file")
 
-        results = await loop.run_in_executor(
+        results, engine_errors = await loop.run_in_executor(
             _pool, search_all_engines, search_url, SERPAPI_KEY
         )
 
@@ -136,7 +136,7 @@ async def search(
 
             await loop.run_in_executor(_pool, _exports)
 
-        return {"search_id": search_id, "count": len(results), "results": results}
+        return {"search_id": search_id, "count": len(results), "results": results, "engine_errors": engine_errors}
 
     except HTTPException:
         shutil.rmtree(work_dir, ignore_errors=True)
@@ -144,40 +144,6 @@ async def search(
     except Exception as e:
         shutil.rmtree(work_dir, ignore_errors=True)
         raise HTTPException(500, str(e))
-
-
-@app.post("/api/export-selection")
-async def export_selection(request: Request):
-    payload = await request.json()
-    results = payload.get("results", [])
-    fmt = payload.get("fmt", "csv")
-    if fmt not in {"csv", "xlsx", "html"}:
-        raise HTTPException(400, "Invalid format")
-    if not results:
-        raise HTTPException(400, "No results provided")
-
-    tmp_dir = Path(tempfile.mkdtemp())
-    out_path = tmp_dir / f"selected.{fmt}"
-    loop = asyncio.get_event_loop()
-
-    if fmt == "csv":
-        await loop.run_in_executor(_pool, export_csv, results, str(out_path))
-    elif fmt == "xlsx":
-        await loop.run_in_executor(_pool, export_excel, results, str(out_path))
-    else:
-        await loop.run_in_executor(_pool, export_html, results, str(out_path), "Selected results")
-
-    media = {
-        "csv":  "text/csv",
-        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "html": "text/html",
-    }
-    return FileResponse(
-        str(out_path),
-        media_type=media[fmt],
-        filename=f"selected.{fmt}",
-        background=BackgroundTask(shutil.rmtree, str(tmp_dir), True),
-    )
 
 
 @app.post("/api/export-selection")
@@ -269,7 +235,7 @@ async def bulk_search(
 
     async def _search_one(search_id, work_dir, search_url, source_label):
         try:
-            results = await loop.run_in_executor(_pool, search_all_engines, search_url, SERPAPI_KEY)
+            results, engine_errors = await loop.run_in_executor(_pool, search_all_engines, search_url, SERPAPI_KEY)
             for r in results:
                 r["source_image"] = source_label
             if results:
@@ -280,7 +246,7 @@ async def bulk_search(
                     export_html(results, f"{prefix}.html", source_label)
                 await loop.run_in_executor(_pool, _exports)
             (work_dir / "results.json").write_text(json.dumps(results))
-            return {"search_id": search_id, "source_label": source_label, "count": len(results), "results": results}
+            return {"search_id": search_id, "source_label": source_label, "count": len(results), "results": results, "engine_errors": engine_errors}
         except Exception as e:
             return {"search_id": search_id, "source_label": source_label, "count": 0, "results": [], "error": str(e)}
 
@@ -562,6 +528,7 @@ _HTML = """<!DOCTYPE html>
       transition: border-color .15s, color .15s, background .15s;
     }
     .new-search-btn:hover { border-color: var(--gray-400); color: var(--gray-700); background: var(--gray-50); }
+    .engine-error-bar { display: none; align-items: flex-start; gap: 8px; padding: 8px 16px; background: #fffbeb; border-bottom: 1px solid #fde68a; font-size: .8rem; color: #92400e; line-height: 1.4; }
 
     /* ── Table ── */
     .table-wrap {
@@ -834,6 +801,7 @@ _HTML = """<!DOCTYPE html>
       </div>
     </div>
 
+    <div class="engine-error-bar" id="engine-error-bar"></div>
     <div class="sel-bar" id="main-sel-bar">
       <button class="sel-btn" onclick="toggleAllMain(true)">Select all</button>
       <button class="sel-btn" onclick="toggleAllMain(false)">Select none</button>
@@ -1139,13 +1107,13 @@ _HTML = """<!DOCTYPE html>
           data = await resp.json();
           if (!resp.ok) { showError(data.detail || 'An unexpected error occurred.'); return; }
           searchId = data.search_id;
-          renderResults(data.results, data.count);
+          renderResults(data.results, data.count, data.engine_errors || {});
         } else {
           fd.append('urls', urls.join('\\n'));
           resp = await fetch('/api/bulk-search', { method: 'POST', body: fd });
           data = await resp.json();
           if (!resp.ok) { showError(data.detail || 'An unexpected error occurred.'); return; }
-          renderBulkResults(data.results);
+          renderBulkResults(data.searches || data.results);
         }
       } else {
         fd.append('file', chosenFile);
@@ -1153,7 +1121,7 @@ _HTML = """<!DOCTYPE html>
         data = await resp.json();
         if (!resp.ok) { showError(data.detail || 'An unexpected error occurred.'); return; }
         searchId = data.search_id;
-        renderResults(data.results, data.count);
+        renderResults(data.results, data.count, data.engine_errors || {});
       }
     } catch {
       showError('Network error — please check your connection and try again.');
@@ -1163,9 +1131,20 @@ _HTML = """<!DOCTYPE html>
   }
 
   // ── Render results ─────────────────────────────────────────────────────────
-  function renderResults(results, count) {
+  function renderEngineErrors(errors, containerId) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    const failed = Object.keys(errors || {});
+    if (!failed.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+    el.style.display = '';
+    el.innerHTML = `<svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="flex-shrink:0;color:#d97706"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 15.75h.007v.008H12v-.008z"/></svg>
+    <span>Could not reach: <strong>${failed.join(', ')}</strong>. Results shown are from the engines that responded. This is usually a SerpAPI plan or credit issue.</span>`;
+  }
+
+  function renderResults(results, count, engineErrors) {
     _singleResults = results;
     document.getElementById('result-num').textContent = count;
+    renderEngineErrors(engineErrors, 'engine-error-bar');
     const tbody = document.getElementById('results-tbody');
     tbody.innerHTML = '';
 

@@ -55,7 +55,8 @@ def search_reverse_image(image_url: str, api_key: str) -> dict:
     return _call_engine({"engine": "google_lens", "url": image_url, "api_key": api_key})
 
 
-def search_all_engines(image_url: str, api_key: str) -> list[dict]:
+def search_all_engines(image_url: str, api_key: str) -> tuple[list[dict], dict[str, str]]:
+    """Returns (results, engine_errors). engine_errors maps engine label → error string."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     engines = [
@@ -65,13 +66,18 @@ def search_all_engines(image_url: str, api_key: str) -> list[dict]:
     ]
 
     by_url = {}
+    engine_errors = {}
 
     with ThreadPoolExecutor(max_workers=3) as executor:
         futures = {executor.submit(_call_engine, params): label for params, label in engines}
         for future in as_completed(futures):
             label = futures[future]
             data = future.result()
-            if "_request_error" not in data:
+            if "_request_error" in data:
+                engine_errors[label] = data["_request_error"]
+            elif "error" in data:
+                engine_errors[label] = data["error"]
+            else:
                 for r in _parse_engine_results(data, label):
                     if not r["url"]:
                         continue
@@ -82,7 +88,7 @@ def search_all_engines(image_url: str, api_key: str) -> list[dict]:
                     else:
                         by_url[r["url"]] = r
 
-    return list(by_url.values())
+    return list(by_url.values()), engine_errors
 
 
 def parse_results(data: dict) -> list[dict]:
