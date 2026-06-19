@@ -17,6 +17,7 @@ from typing import List
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from reverse_image_search import (
     export_csv,
@@ -60,6 +61,7 @@ TEMP_DIR.mkdir(exist_ok=True)
 
 _pool = ThreadPoolExecutor(max_workers=4)
 app = FastAPI(title="Image Intelligence")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -261,6 +263,7 @@ _HTML = """<!DOCTYPE html>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Magpie</title>
+  <link rel="icon" type="image/png" href="/static/favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap">
