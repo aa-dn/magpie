@@ -260,7 +260,7 @@ _HTML = """<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Image Intelligence · ISD</title>
+  <title>Magpie</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap">
@@ -873,8 +873,6 @@ _HTML = """<!DOCTYPE html>
           <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>`;
       list.appendChild(item);
-      reader.onload = e => { item.querySelector('img').src = e.target.result; };
-      reader.readAsDataURL(f);
     });
     if (bulkFiles.length > 0 && !document.getElementById('bulk-search-btn')) {
       const btn = document.createElement('button');
