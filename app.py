@@ -180,6 +180,40 @@ async def export_selection(request: Request):
     )
 
 
+@app.post("/api/export-selection")
+async def export_selection(request: Request):
+    payload = await request.json()
+    results = payload.get("results", [])
+    fmt = payload.get("fmt", "csv")
+    if fmt not in {"csv", "xlsx", "html"}:
+        raise HTTPException(400, "Invalid format")
+    if not results:
+        raise HTTPException(400, "No results provided")
+
+    tmp_dir = Path(tempfile.mkdtemp())
+    out_path = tmp_dir / f"selected.{fmt}"
+    loop = asyncio.get_event_loop()
+
+    if fmt == "csv":
+        await loop.run_in_executor(_pool, export_csv, results, str(out_path))
+    elif fmt == "xlsx":
+        await loop.run_in_executor(_pool, export_excel, results, str(out_path))
+    else:
+        await loop.run_in_executor(_pool, export_html, results, str(out_path), "Selected results")
+
+    media = {
+        "csv":  "text/csv",
+        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "html": "text/html",
+    }
+    return FileResponse(
+        str(out_path),
+        media_type=media[fmt],
+        filename=f"selected.{fmt}",
+        background=BackgroundTask(shutil.rmtree, str(tmp_dir), True),
+    )
+
+
 @app.get("/api/download/{search_id}/{fmt}")
 async def download_file(search_id: str, fmt: str):
     if fmt not in {"csv", "xlsx", "html"}:
