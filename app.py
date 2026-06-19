@@ -35,7 +35,7 @@ from reverse_image_search import (
 # Text
 BRAND_NAME     = '<span class="grad">magpie</span>'
 BRAND_SUBTITLE = '<span class="grad">Mag</span>ic <span class="grad">P</span>icture <span class="grad">I</span>ntelligence <span class="grad">E</span>xporter'
-HERO_HEADING   = 'Upload or link an image and this little <span class="grad">magpie</span> will go collect similar photos from Google, Yandex, and Bing for you.</span><br>'
+HERO_HEADING   = 'Upload or link an image and this little <span class="grad">magpie</span> will go collect similar photos from Google for you.</span><br>'
 HERO_SUBTEXT   = 'Use him to find other instances of a picture across the web. Download results per photo, or all results combined. <br> (Take results with a grain of salt; he\'s only a bird.) '
 
 # Logo — leave blank to keep the default search icon,
@@ -77,6 +77,28 @@ async def debug_env():
         "SERPAPI_KEY_length": len(key),
         "all_env_keys": sorted(os.environ.keys()),
     }
+
+
+@app.get("/debug/raw-search")
+async def debug_raw_search(url: str, engine: str = "all"):
+    """Return raw SerpAPI responses — use to diagnose empty results.
+    Example: /debug/raw-search?url=https://example.com/image.jpg&engine=bing
+    """
+    from reverse_image_search import _call_engine, _ENGINE_CONFIGS
+    if not SERPAPI_KEY:
+        return {"error": "SERPAPI_KEY not set"}
+    configs = {k: v for k, v in _ENGINE_CONFIGS.items() if engine == "all" or k == engine}
+    out = {}
+    for key, (base_params, url_param, label) in configs.items():
+        params = {**base_params, url_param: url, "api_key": SERPAPI_KEY}
+        data = _call_engine(params)
+        out[label] = {
+            "top_level_keys": list(data.keys()),
+            "error": data.get("error"),
+            "result_counts": {k: len(v) for k, v in data.items() if isinstance(v, list)},
+            "first_result": next((v[0] for v in data.values() if isinstance(v, list) and v), None),
+        }
+    return out
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -761,14 +783,6 @@ _HTML = """<!DOCTYPE html>
       </div>
       <input type="file" id="bulk-input" accept="image/*" multiple style="display:none">
       <div class="bulk-file-list" id="bulk-file-list"></div>
-    </div>
-
-    <div class="engine-picker">
-      <label>Engines:</label>
-      <label class="engine-pill"><input type="radio" name="engine-choice" value="all" checked><span>All</span></label>
-      <label class="engine-pill"><input type="radio" name="engine-choice" value="google"><span>Google Lens</span></label>
-      <label class="engine-pill"><input type="radio" name="engine-choice" value="bing"><span>Bing</span></label>
-      <label class="engine-pill"><input type="radio" name="engine-choice" value="yandex"><span>Yandex</span></label>
     </div>
 
     <button class="search-btn" id="search-btn" onclick="doSearch()">
