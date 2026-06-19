@@ -79,6 +79,20 @@ async def debug_env():
     }
 
 
+@app.get("/api/credits")
+async def get_credits():
+    if not SERPAPI_KEY:
+        raise HTTPException(500, "SERPAPI_KEY not set")
+    import requests as _requests
+    try:
+        resp = _requests.get("https://serpapi.com/account", params={"api_key": SERPAPI_KEY}, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        return {"total_searches_left": data.get("total_searches_left", 0)}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 @app.get("/debug/raw-search")
 async def debug_raw_search(url: str, engine: str = "all"):
     """Return raw SerpAPI responses — use to diagnose empty results.
@@ -571,6 +585,24 @@ _HTML = """<!DOCTYPE html>
       transition: border-color .15s, color .15s, background .15s;
     }
     .new-search-btn:hover { border-color: var(--gray-400); color: var(--gray-700); background: var(--gray-50); }
+    #credit-widget {
+      position: fixed; bottom: 16px; left: 16px; z-index: 200;
+      display: flex; align-items: center; gap: 6px;
+      background: rgba(15,15,20,.72); backdrop-filter: blur(10px);
+      color: rgba(255,255,255,.85); font-size: .72rem; font-weight: 500;
+      padding: 5px 11px; border-radius: 999px;
+      border: 1px solid rgba(255,255,255,.12);
+      cursor: pointer; transition: background .15s;
+      user-select: none;
+    }
+    #credit-widget:hover { background: rgba(30,30,40,.85); }
+    #credit-widget .cw-num { font-weight: 700; color: #fff; }
+    #credit-widget .cw-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: #4ade80; flex-shrink: 0;
+    }
+    #credit-widget.cw-low .cw-dot { background: #f97316; }
+    #credit-widget.cw-empty .cw-dot { background: #ef4444; }
     .load-more-wrap { text-align: center; padding: 1.25rem 1rem; display: none; }
     .load-more-btn {
       position: relative; display: inline-flex; align-items: center; gap: .4rem;
@@ -946,6 +978,12 @@ _HTML = """<!DOCTYPE html>
 
 </main>
 
+<div id="credit-widget" onclick="refreshCredits()" title="SerpAPI credits remaining — click to refresh">
+  <span class="cw-dot"></span>
+  <span class="cw-num" id="credit-count">—</span>
+  <span>credits</span>
+</div>
+
 <script>
   let searchId = null;
   let activeTab = 'url';
@@ -1070,6 +1108,7 @@ _HTML = """<!DOCTYPE html>
       showError('Network error — please check your connection and try again.');
     } finally {
       setLoading(false);
+      refreshCredits();
     }
   }
 
@@ -1218,6 +1257,7 @@ _HTML = """<!DOCTYPE html>
       showError('Network error — please check your connection and try again.');
     } finally {
       setLoading(false);
+      refreshCredits();
     }
   }
 
@@ -1307,6 +1347,7 @@ _HTML = """<!DOCTYPE html>
     } finally {
       btn.disabled = false;
       btn.querySelector('.credit-badge').textContent = '+1 credit';
+      refreshCredits();
     }
   }
 
@@ -1399,6 +1440,20 @@ _HTML = """<!DOCTYPE html>
     if (!s) return '';
     return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
+
+  // ── Credit counter ─────────────────────────────────────────────────────────
+  async function refreshCredits() {
+    try {
+      const resp = await fetch('/api/credits');
+      if (!resp.ok) return;
+      const { total_searches_left: n } = await resp.json();
+      document.getElementById('credit-count').textContent = n.toLocaleString();
+      const w = document.getElementById('credit-widget');
+      w.classList.toggle('cw-low',   n > 0 && n <= 500);
+      w.classList.toggle('cw-empty', n === 0);
+    } catch {}
+  }
+  refreshCredits();
 
   // ── Clear / reset ──────────────────────────────────────────────────────────
   function clearResults() {
