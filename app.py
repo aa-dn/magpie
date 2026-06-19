@@ -6,6 +6,7 @@ Set SERPAPI_KEY as an environment variable, then run:
 """
 
 import asyncio
+import functools
 import json
 import os
 import shutil
@@ -98,6 +99,7 @@ async def search(
     request: Request,
     image_url: str = Form(default=None),
     file: UploadFile = File(default=None),
+    engines: str = Form(default="all"),
 ):
     if not SERPAPI_KEY:
         raise HTTPException(500, "Server not configured — SERPAPI_KEY missing")
@@ -122,8 +124,9 @@ async def search(
         else:
             raise HTTPException(400, "Provide an image URL or upload a file")
 
+        only = engines if engines in {"all", "google", "bing", "yandex"} else "all"
         results, engine_errors = await loop.run_in_executor(
-            _pool, search_all_engines, search_url, SERPAPI_KEY
+            _pool, functools.partial(search_all_engines, search_url, SERPAPI_KEY, only)
         )
 
         if results:
@@ -204,6 +207,7 @@ async def bulk_search(
     request: Request,
     files: List[UploadFile] = File(default=[]),
     urls: str = Form(default=""),
+    engines: str = Form(default="all"),
 ):
     if not SERPAPI_KEY:
         raise HTTPException(500, "Server not configured — SERPAPI_KEY missing")
@@ -231,11 +235,14 @@ async def bulk_search(
     if not targets:
         raise HTTPException(400, "Provide at least one image or URL")
 
+    only = engines if engines in {"all", "google", "bing", "yandex"} else "all"
     loop = asyncio.get_event_loop()
 
     async def _search_one(search_id, work_dir, search_url, source_label):
         try:
-            results, engine_errors = await loop.run_in_executor(_pool, search_all_engines, search_url, SERPAPI_KEY)
+            results, engine_errors = await loop.run_in_executor(
+                _pool, functools.partial(search_all_engines, search_url, SERPAPI_KEY, only)
+            )
             for r in results:
                 r["source_image"] = source_label
             if results:
@@ -529,6 +536,17 @@ _HTML = """<!DOCTYPE html>
     }
     .new-search-btn:hover { border-color: var(--gray-400); color: var(--gray-700); background: var(--gray-50); }
     .engine-error-bar { display: none; align-items: flex-start; gap: 8px; padding: 8px 16px; background: #fffbeb; border-bottom: 1px solid #fde68a; font-size: .8rem; color: #92400e; line-height: 1.4; }
+    .engine-picker { display: flex; align-items: center; gap: 6px; margin-top: 1rem; flex-wrap: wrap; }
+    .engine-picker label { font-size: .78rem; color: rgba(255,255,255,.65); margin-right: 4px; }
+    .engine-pill input { display: none; }
+    .engine-pill span {
+      display: inline-block; padding: 4px 12px; border-radius: 999px; cursor: pointer;
+      font-size: .78rem; font-weight: 500; border: 1.5px solid rgba(255,255,255,.35);
+      color: rgba(255,255,255,.7); background: rgba(255,255,255,.08);
+      transition: background .15s, border-color .15s, color .15s;
+      user-select: none;
+    }
+    .engine-pill input:checked + span { background: rgba(255,255,255,.22); border-color: rgba(255,255,255,.8); color: #fff; }
 
     /* ── Table ── */
     .table-wrap {
@@ -743,6 +761,14 @@ _HTML = """<!DOCTYPE html>
       </div>
       <input type="file" id="bulk-input" accept="image/*" multiple style="display:none">
       <div class="bulk-file-list" id="bulk-file-list"></div>
+    </div>
+
+    <div class="engine-picker">
+      <label>Engines:</label>
+      <label class="engine-pill"><input type="radio" name="engine-choice" value="all" checked><span>All</span></label>
+      <label class="engine-pill"><input type="radio" name="engine-choice" value="google"><span>Google Lens</span></label>
+      <label class="engine-pill"><input type="radio" name="engine-choice" value="bing"><span>Bing</span></label>
+      <label class="engine-pill"><input type="radio" name="engine-choice" value="yandex"><span>Yandex</span></label>
     </div>
 
     <button class="search-btn" id="search-btn" onclick="doSearch()">
@@ -977,6 +1003,7 @@ _HTML = """<!DOCTYPE html>
     try {
       const fd = new FormData();
       bulkFiles.forEach(f => fd.append('files', f));
+      fd.append('engines', getEngineChoice());
       const resp = await fetch('/api/bulk-search', { method: 'POST', body: fd });
       const data = await resp.json();
       if (!resp.ok) { showError(data.detail || 'An unexpected error occurred.'); return; }
@@ -1085,6 +1112,11 @@ _HTML = """<!DOCTYPE html>
   }
 
   // ── Search ─────────────────────────────────────────────────────────────────
+  function getEngineChoice() {
+    const el = document.querySelector('input[name="engine-choice"]:checked');
+    return el ? el.value : 'all';
+  }
+
   async function doSearch() {
     if (activeTab === 'url' && !document.getElementById('url-input').value.trim()) {
       alert('Please enter an image URL.'); return;
@@ -1098,6 +1130,7 @@ _HTML = """<!DOCTYPE html>
 
     try {
       const fd = new FormData();
+      fd.append('engines', getEngineChoice());
       let resp, data;
       if (activeTab === 'url') {
         const urls = document.getElementById('url-input').value.trim().split(/\\r?\\n/).map(u => u.trim()).filter(Boolean);

@@ -55,15 +55,23 @@ def search_reverse_image(image_url: str, api_key: str) -> dict:
     return _call_engine({"engine": "google_lens", "url": image_url, "api_key": api_key})
 
 
-def search_all_engines(image_url: str, api_key: str) -> tuple[list[dict], dict[str, str]]:
-    """Returns (results, engine_errors). engine_errors maps engine label → error string."""
+_ENGINE_CONFIGS = {
+    "google": ({"engine": "google_lens"}, "url", "Google Lens"),
+    "yandex": ({"engine": "yandex_reverse_image_search"}, "image_url", "Yandex"),
+    "bing":   ({"engine": "bing_visual_search"}, "image_url", "Bing"),
+}
+
+
+def search_all_engines(image_url: str, api_key: str, only: str = "all") -> tuple[list[dict], dict[str, str]]:
+    """Returns (results, engine_errors). only: 'all' | 'google' | 'bing' | 'yandex'."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    engines = [
-        ({"engine": "google_lens", "url": image_url, "api_key": api_key}, "Google Lens"),
-        ({"engine": "yandex_reverse_image_search", "image_url": image_url, "api_key": api_key}, "Yandex"),
-        ({"engine": "bing_visual_search", "image_url": image_url, "api_key": api_key}, "Bing"),
-    ]
+    keys = list(_ENGINE_CONFIGS.keys()) if only == "all" else [only]
+    engines = []
+    for key in keys:
+        base_params, url_param, label = _ENGINE_CONFIGS[key]
+        params = {**base_params, url_param: image_url, "api_key": api_key}
+        engines.append((params, label))
 
     by_url = {}
     engine_errors = {}
