@@ -528,12 +528,7 @@ _HTML = """<!DOCTYPE html>
     /* ── Loading ── */
     .loading { display: none; text-align: center; padding: 3rem 1.5rem; }
     .loading.show { display: block; }
-    .spinner {
-      width: 2.5rem; height: 2.5rem; margin: 0 auto 1.25rem;
-      border: 3px solid var(--brand-100); border-top-color: var(--brand);
-      border-radius: 50%; animation: spin .7s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
+    .bird-loader { width: 90px; height: auto; margin: 0 auto 1rem; display: block; }
     .loading p { color: var(--gray-600); font-size: .9375rem; font-weight: 500; }
     .loading .hint { font-size: .8125rem; color: var(--gray-400); margin-top: .5rem; }
 
@@ -893,7 +888,7 @@ _HTML = """<!DOCTYPE html>
 
   <!-- Loading -->
   <div class="loading" id="loading">
-    <div class="spinner"></div>
+    <img class="bird-loader" src="/static/magpie flying gif.gif" alt="Searching…">
     <p>Searching the web&hellip;</p>
     <p class="hint">Fetching thumbnails for your Excel report &mdash; this may take up to a minute.</p>
   </div>
