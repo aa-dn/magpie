@@ -62,7 +62,7 @@ _ENGINE_CONFIGS = {
 }
 
 
-def search_all_engines(image_url: str, api_key: str, only: str = "all") -> tuple[list[dict], dict[str, str]]:
+def search_all_engines(image_url: str, api_key: str, only: str = "all", start: int = 0) -> tuple[list[dict], dict[str, str]]:
     """Returns (results, engine_errors). only: 'all' | 'google' | 'bing' | 'yandex'."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -71,6 +71,8 @@ def search_all_engines(image_url: str, api_key: str, only: str = "all") -> tuple
     for key in keys:
         base_params, url_param, label = _ENGINE_CONFIGS[key]
         params = {**base_params, url_param: image_url, "api_key": api_key}
+        if key == "google" and start > 0:
+            params["start"] = start
         engines.append((params, label))
 
     by_url = {}

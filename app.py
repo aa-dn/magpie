@@ -161,7 +161,7 @@ async def search(
 
             await loop.run_in_executor(_pool, _exports)
 
-        return {"search_id": search_id, "count": len(results), "results": results, "engine_errors": engine_errors}
+        return {"search_id": search_id, "count": len(results), "results": results, "engine_errors": engine_errors, "search_url": search_url}
 
     except HTTPException:
         shutil.rmtree(work_dir, ignore_errors=True)
@@ -169,6 +169,20 @@ async def search(
     except Exception as e:
         shutil.rmtree(work_dir, ignore_errors=True)
         raise HTTPException(500, str(e))
+
+
+@app.post("/api/search-more")
+async def search_more(
+    search_url: str = Form(...),
+    start: int = Form(default=0),
+):
+    if not SERPAPI_KEY:
+        raise HTTPException(500, "SERPAPI_KEY missing")
+    loop = asyncio.get_event_loop()
+    results, engine_errors = await loop.run_in_executor(
+        _pool, functools.partial(search_all_engines, search_url, SERPAPI_KEY, "google", start)
+    )
+    return {"count": len(results), "results": results, "engine_errors": engine_errors}
 
 
 @app.post("/api/export-selection")
@@ -557,6 +571,26 @@ _HTML = """<!DOCTYPE html>
       transition: border-color .15s, color .15s, background .15s;
     }
     .new-search-btn:hover { border-color: var(--gray-400); color: var(--gray-700); background: var(--gray-50); }
+    .load-more-wrap { text-align: center; padding: 1.25rem 1rem; display: none; }
+    .load-more-btn {
+      position: relative; display: inline-flex; align-items: center; gap: .4rem;
+      padding: .5rem 1.25rem; border-radius: .6rem; cursor: pointer; font-family: inherit;
+      font-size: .85rem; font-weight: 500; border: 1.5px solid var(--gray-200);
+      background: #fff; color: var(--gray-700); transition: border-color .15s, color .15s, background .15s;
+    }
+    .load-more-btn:hover:not(:disabled) { border-color: var(--brand-light); color: var(--brand); background: var(--brand-50); }
+    .load-more-btn:disabled { opacity: .55; cursor: not-allowed; }
+    .load-more-btn .credit-badge { font-size: .7rem; padding: 1px 6px; border-radius: 999px; background: var(--gray-100); color: var(--gray-500); }
+    .load-more-btn .tooltip {
+      position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+      background: #1f2937; color: #fff; font-size: .72rem; padding: 5px 9px; border-radius: 5px;
+      white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .15s; z-index: 10;
+    }
+    .load-more-btn .tooltip::after {
+      content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+      border: 5px solid transparent; border-top-color: #1f2937;
+    }
+    .load-more-btn:hover .tooltip { opacity: 1; }
     .engine-error-bar { display: none; align-items: flex-start; gap: 8px; padding: 8px 16px; background: #fffbeb; border-bottom: 1px solid #fde68a; font-size: .8rem; color: #92400e; line-height: 1.4; }
     .engine-picker { display: flex; align-items: center; gap: 6px; margin-top: 1rem; flex-wrap: wrap; }
     .engine-picker label { font-size: .78rem; color: rgba(255,255,255,.65); margin-right: 4px; }
@@ -872,6 +906,13 @@ _HTML = """<!DOCTYPE html>
         <tbody id="results-tbody"></tbody>
       </table>
     </div>
+    <div class="load-more-wrap" id="load-more-wrap">
+      <button class="load-more-btn" id="load-more-btn" onclick="loadMore()">
+        <span class="tooltip">Each page costs 1 SerpAPI credit</span>
+        Load more results
+        <span class="credit-badge">+1 credit</span>
+      </button>
+    </div>
   </div>
 
   <!-- Bulk results -->
@@ -911,6 +952,9 @@ _HTML = """<!DOCTYPE html>
   let chosenFile = null;
   let _singleResults = [];
   let _bulkSections = [];
+  let _searchUrl = null;
+  let _searchStart = 0;
+  const _PAGE_SIZE = 59;
 
   // ── Tab switching ──────────────────────────────────────────────────────────
   function switchTab(tab) {
@@ -1153,7 +1197,7 @@ _HTML = """<!DOCTYPE html>
           resp = await fetch('/api/search', { method: 'POST', body: fd });
           data = await resp.json();
           if (!resp.ok) { showError(data.detail || 'An unexpected error occurred.'); return; }
-          searchId = data.search_id;
+          searchId = data.search_id; _searchUrl = data.search_url; _searchStart = 0;
           renderResults(data.results, data.count, data.engine_errors || {});
         } else {
           fd.append('urls', urls.join('\\n'));
@@ -1167,7 +1211,7 @@ _HTML = """<!DOCTYPE html>
         resp = await fetch('/api/search', { method: 'POST', body: fd });
         data = await resp.json();
         if (!resp.ok) { showError(data.detail || 'An unexpected error occurred.'); return; }
-        searchId = data.search_id;
+        searchId = data.search_id; _searchUrl = data.search_url; _searchStart = 0;
         renderResults(data.results, data.count, data.engine_errors || {});
       }
     } catch {
@@ -1188,6 +1232,33 @@ _HTML = """<!DOCTYPE html>
     <span>Could not reach: <strong>${failed.join(', ')}</strong>. Results shown are from the engines that responded. This is usually a SerpAPI plan or credit issue.</span>`;
   }
 
+  function makeResultRow(r, idx) {
+    const thumbCell = r.thumbnail
+      ? `<img class="thumb-img" src="${h(r.thumbnail)}" alt="" loading="lazy"
+             onerror="this.outerHTML='<div class=thumb-empty><svg width=20 height=20 fill=none viewBox=\\'0 0 24 24\\' stroke=currentColor stroke-width=1.5><path stroke-linecap=round stroke-linejoin=round d=\\'M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M21 18.75H3.75A1.5 1.5 0 012.25 17.25V6.75A1.5 1.5 0 013.75 5.25h16.5A1.5 1.5 0 0121.75 6.75v10.5A1.5 1.5 0 0120.25 18.75z\\'/></svg></div>'">`
+      : `<div class="thumb-empty"><svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M21 18.75H3.75A1.5 1.5 0 012.25 17.25V6.75A1.5 1.5 0 013.75 5.25h16.5A1.5 1.5 0 0121.75 6.75v10.5A1.5 1.5 0 0120.25 18.75z"/></svg></div>`;
+    const titleCell = r.url
+      ? `<a class="title-link" href="${h(r.url)}" target="_blank" rel="noopener">${h(r.title || r.url)}</a>`
+      : `<span style="color:var(--gray-400)">${h(r.title || '—')}</span>`;
+    const engineClass = r.engine && r.engine.includes('·') ? 'multi' : r.engine === 'Yandex' ? 'yandex' : r.engine === 'Bing' ? 'bing' : 'google';
+    const engineBadge = r.engine ? `<span class="engine-badge ${engineClass}">${h(r.engine)}</span>` : '—';
+    const row = document.createElement('tr');
+    row.dataset.idx = idx;
+    row.innerHTML = `
+      <td class="col-cb"><input type="checkbox" class="result-cb" checked onchange="updateMainCount()"></td>
+      <td><span class="row-num">${idx + 1}</span></td>
+      <td>${thumbCell}</td>
+      <td>${titleCell}</td>
+      <td><span class="source-text" title="${h(r.source)}">${h(r.source || '—')}</span></td>
+      <td>${engineBadge}</td>`;
+    return row;
+  }
+
+  function checkLoadMore(pageCount) {
+    const wrap = document.getElementById('load-more-wrap');
+    if (wrap) wrap.style.display = pageCount >= _PAGE_SIZE ? '' : 'none';
+  }
+
   function renderResults(results, count, engineErrors) {
     _singleResults = results;
     document.getElementById('result-num').textContent = count;
@@ -1203,34 +1274,40 @@ _HTML = """<!DOCTYPE html>
         <p>No results found for this image.</p>
       </div></td></tr>`;
     } else {
-      results.forEach((r, i) => {
-        const thumbCell = r.thumbnail
-          ? `<img class="thumb-img" src="${h(r.thumbnail)}" alt="" loading="lazy"
-               onerror="this.outerHTML='<div class=thumb-empty><svg width=20 height=20 fill=none viewBox=\\'0 0 24 24\\' stroke=currentColor stroke-width=1.5><path stroke-linecap=round stroke-linejoin=round d=\\'M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M21 18.75H3.75A1.5 1.5 0 012.25 17.25V6.75A1.5 1.5 0 013.75 5.25h16.5A1.5 1.5 0 0121.75 6.75v10.5A1.5 1.5 0 0120.25 18.75z\\'/></svg></div>'">`
-          : `<div class="thumb-empty"><svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M21 18.75H3.75A1.5 1.5 0 012.25 17.25V6.75A1.5 1.5 0 013.75 5.25h16.5A1.5 1.5 0 0121.75 6.75v10.5A1.5 1.5 0 0120.25 18.75z"/></svg></div>`;
-
-        const titleCell = r.url
-          ? `<a class="title-link" href="${h(r.url)}" target="_blank" rel="noopener">${h(r.title || r.url)}</a>`
-          : `<span style="color:var(--gray-400)">${h(r.title || '—')}</span>`;
-
-        const engineClass = r.engine && r.engine.includes('·') ? 'multi' : r.engine === 'Yandex' ? 'yandex' : r.engine === 'Bing' ? 'bing' : 'google';
-        const engineBadge = r.engine ? `<span class="engine-badge ${engineClass}">${h(r.engine)}</span>` : '—';
-
-        const row = document.createElement('tr');
-        row.dataset.idx = i;
-        row.innerHTML = `
-          <td class="col-cb"><input type="checkbox" class="result-cb" checked onchange="updateMainCount()"></td>
-          <td><span class="row-num">${i + 1}</span></td>
-          <td>${thumbCell}</td>
-          <td>${titleCell}</td>
-          <td><span class="source-text" title="${h(r.source)}">${h(r.source || '—')}</span></td>
-          <td>${engineBadge}</td>`;
-        tbody.appendChild(row);
-      });
+      results.forEach((r, i) => tbody.appendChild(makeResultRow(r, i)));
     }
 
     updateMainCount();
+    checkLoadMore(count);
     document.getElementById('results').classList.add('show');
+  }
+
+  async function loadMore() {
+    if (!_searchUrl) return;
+    const btn = document.getElementById('load-more-btn');
+    btn.disabled = true;
+    btn.querySelector('.credit-badge').textContent = 'Loading…';
+    try {
+      const fd = new FormData();
+      fd.append('search_url', _searchUrl);
+      fd.append('start', _searchStart + _PAGE_SIZE);
+      const resp = await fetch('/api/search-more', {method: 'POST', body: fd});
+      const data = await resp.json();
+      if (!resp.ok) { showError(data.detail || 'Failed to load more results.'); return; }
+      _searchStart += _PAGE_SIZE;
+      const startIdx = _singleResults.length;
+      _singleResults = _singleResults.concat(data.results);
+      document.getElementById('result-num').textContent = _singleResults.length;
+      const tbody = document.getElementById('results-tbody');
+      data.results.forEach((r, i) => tbody.appendChild(makeResultRow(r, startIdx + i)));
+      updateMainCount();
+      checkLoadMore(data.count);
+    } catch {
+      showError('Network error — could not load more results.');
+    } finally {
+      btn.disabled = false;
+      btn.querySelector('.credit-badge').textContent = '+1 credit';
+    }
   }
 
   // ── Selection helpers ──────────────────────────────────────────────────────
@@ -1335,6 +1412,10 @@ _HTML = """<!DOCTYPE html>
     _bulkSections  = [];
     searchId       = null;
     bulkSearchIds  = [];
+    _searchUrl     = null;
+    _searchStart   = 0;
+    const lmw = document.getElementById('load-more-wrap');
+    if (lmw) lmw.style.display = 'none';
     document.getElementById('results-tbody').innerHTML = '';
     document.getElementById('bulk-sections').innerHTML = '';
 
@@ -1346,7 +1427,7 @@ _HTML = """<!DOCTYPE html>
 
     // Hide single-file preview
     const prev = document.getElementById('file-preview');
-    if (prev) prev.style.display = 'none';
+    if (prev) prev.classList.remove('show');
 
     // Reset bulk file state
     bulkFiles = [];
