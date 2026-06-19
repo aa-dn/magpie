@@ -45,7 +45,7 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Reverse Image Search")
-        self.minsize(720, 760)
+        self.minsize(720, 540)
         self.resizable(True, True)
 
         style = ttk.Style(self)
@@ -54,184 +54,69 @@ class App(tk.Tk):
                 style.theme_use(theme)
                 break
 
-        style.configure("Header.TLabel",  font=("Segoe UI", 13, "bold"))
-        style.configure("Section.TLabel", font=("Segoe UI", 9, "bold"), foreground="#555")
-        style.configure("Run.TButton",    font=("Segoe UI", 10, "bold"), padding=6)
+        style.configure("Header.TLabel",    font=("Segoe UI", 13, "bold"))
+        style.configure("Section.TLabel",   font=("Segoe UI", 9, "bold"), foreground="#555")
+        style.configure("Run.TButton",      font=("Segoe UI", 10, "bold"), padding=6)
         style.configure("ColHeader.TLabel", font=("Segoe UI", 8, "bold"), foreground="#555")
 
         self._config = load_config()
         self._results = []
         self._result_vars = []
         self._source_label = ""
-        self._file_paths = []          # ordered list of absolute paths
+        self._file_paths = []
         self._build_ui()
         self._restore_saved()
 
-    # ── UI Construction ────────────────────────────────────────────────────────
+    # ── UI layout ──────────────────────────────────────────────────────────────
+    #
+    # root_frame rows (only row 4 expands):
+    #   0 — scrollable form canvas   (fixed height, scrolls internally)
+    #   1 — scrollbar for the form   (same row, column 1)
+    #   2 — action buttons           (always visible)
+    #   3 — progress log             (always visible, 3 lines)
+    #   4 — results panel            (weight=1, fills rest of window)
+    # ─────────────────────────────────────────────────────────────────────────
 
     def _build_ui(self):
-        pad = {"padx": 16, "pady": 5}
-
         root_frame = ttk.Frame(self)
         root_frame.pack(fill="both", expand=True)
-        root_frame.columnconfigure(1, weight=1)
-        # Only the results panel row expands; everything above is fixed height.
+        root_frame.columnconfigure(0, weight=1)
+        root_frame.rowconfigure(4, weight=1)   # results expands
 
-        r = 0
+        # ── Scrollable form ────────────────────────────────────────────────────
+        # Fixed pixel height so it never pushes the Search button off-screen.
+        # Users can mousewheel-scroll to reach Output settings.
+        self._form_canvas = tk.Canvas(root_frame, height=310, highlightthickness=0)
+        form_vsb = ttk.Scrollbar(root_frame, orient="vertical",
+                                  command=self._form_canvas.yview)
+        self._form_canvas.configure(yscrollcommand=form_vsb.set)
+        self._form_canvas.grid(row=0, column=0, sticky="ew")
+        form_vsb.grid(row=0, column=1, sticky="ns")
 
-        # ── Header ──
-        ttk.Label(root_frame, text="Reverse Image Search", style="Header.TLabel").grid(
-            row=r, column=0, columnspan=3, sticky="w", padx=16, pady=(12, 2)
-        )
-        r += 1
-        ttk.Label(
-            root_frame,
-            text="Find everywhere an image appears online, then export a visual report.",
-            foreground="#666",
-        ).grid(row=r, column=0, columnspan=3, sticky="w", padx=16, pady=(0, 8))
-        r += 1
+        form = ttk.Frame(self._form_canvas)
+        form.columnconfigure(1, weight=1)
+        _form_win = self._form_canvas.create_window((0, 0), window=form, anchor="nw")
+
+        form.bind("<Configure>",
+                  lambda e: self._form_canvas.configure(
+                      scrollregion=self._form_canvas.bbox("all")))
+        self._form_canvas.bind("<Configure>",
+                               lambda e: self._form_canvas.itemconfig(
+                                   _form_win, width=e.width))
+        self._form_canvas.bind("<MouseWheel>",
+                               lambda e: self._form_canvas.yview_scroll(
+                                   int(-1 * (e.delta / 120)), "units"))
+
+        self._populate_form(form)
+
+        # ── Separator ─────────────────────────────────────────────────────────
         ttk.Separator(root_frame, orient="horizontal").grid(
-            row=r, column=0, columnspan=3, sticky="ew", padx=16, pady=2
-        )
-        r += 1
-
-        # ── Image input ──
-        ttk.Label(root_frame, text="IMAGE INPUT", style="Section.TLabel").grid(
-            row=r, column=0, columnspan=3, sticky="w", **pad
-        )
-        r += 1
-
-        ttk.Label(root_frame, text="Image URL").grid(
-            row=r, column=0, sticky="w", padx=(16, 8), pady=4
-        )
-        self.url_var = tk.StringVar()
-        ttk.Entry(root_frame, textvariable=self.url_var).grid(
-            row=r, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=4
-        )
-        r += 1
-
-        ttk.Label(root_frame, text="— or —", foreground="#888").grid(
-            row=r, column=0, columnspan=3, pady=2
-        )
-        r += 1
-
-        # Multi-file input: Listbox (fixed height=4) + action buttons
-        ttk.Label(root_frame, text="Local image files").grid(
-            row=r, column=0, sticky="nw", padx=(16, 8), pady=(6, 2)
+            row=1, column=0, columnspan=2, sticky="ew", padx=16, pady=(4, 4)
         )
 
-        file_area = ttk.Frame(root_frame)
-        file_area.grid(row=r, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=(4, 2))
-        file_area.columnconfigure(0, weight=1)
-
-        lb_frame = ttk.Frame(file_area)
-        lb_frame.grid(row=0, column=0, sticky="ew")
-        lb_frame.columnconfigure(0, weight=1)
-
-        self._file_listbox = tk.Listbox(
-            lb_frame, height=4, selectmode=tk.EXTENDED,
-            font=("Segoe UI", 9), activestyle="none",
-            relief="sunken", borderwidth=1,
-        )
-        lb_vsb = ttk.Scrollbar(lb_frame, orient="vertical", command=self._file_listbox.yview)
-        self._file_listbox.configure(yscrollcommand=lb_vsb.set)
-        self._file_listbox.grid(row=0, column=0, sticky="ew")
-        lb_vsb.grid(row=0, column=1, sticky="ns")
-
-        lb_btns = ttk.Frame(file_area)
-        lb_btns.grid(row=1, column=0, sticky="w", pady=(4, 0))
-        ttk.Button(lb_btns, text="Add files…",       command=self._browse_images).pack(side="left", padx=(0, 6))
-        ttk.Button(lb_btns, text="Remove selected",  command=self._remove_selected_files).pack(side="left", padx=(0, 6))
-        ttk.Button(lb_btns, text="Clear all",        command=self._clear_files).pack(side="left")
-
-        ttk.Label(file_area, text="Tip: hold Ctrl or Shift in the dialog to pick multiple files at once.",
-                  foreground="#999", font=("Segoe UI", 8)).grid(row=2, column=0, sticky="w", pady=(3, 0))
-        r += 1
-
-        ttk.Separator(root_frame, orient="horizontal").grid(
-            row=r, column=0, columnspan=3, sticky="ew", padx=16, pady=6
-        )
-        r += 1
-
-        # ── API key ──
-        ttk.Label(root_frame, text="API KEY", style="Section.TLabel").grid(
-            row=r, column=0, columnspan=3, sticky="w", **pad
-        )
-        r += 1
-
-        ttk.Label(root_frame, text="SerpAPI key").grid(
-            row=r, column=0, sticky="w", padx=(16, 8), pady=4
-        )
-        self.key_var = tk.StringVar()
-        self._key_entry = ttk.Entry(root_frame, textvariable=self.key_var, show="•")
-        self._key_entry.grid(row=r, column=1, sticky="ew", padx=(0, 6), pady=4)
-        self._show_key = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            root_frame, text="Show", variable=self._show_key,
-            command=lambda: self._key_entry.config(show="" if self._show_key.get() else "•"),
-        ).grid(row=r, column=2, padx=(0, 16))
-        r += 1
-
-        self._save_key = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            root_frame, text="Remember key on this computer", variable=self._save_key
-        ).grid(row=r, column=1, sticky="w", padx=(0, 16), pady=(0, 4))
-        r += 1
-
-        ttk.Separator(root_frame, orient="horizontal").grid(
-            row=r, column=0, columnspan=3, sticky="ew", padx=16, pady=6
-        )
-        r += 1
-
-        # ── Output settings ──
-        ttk.Label(root_frame, text="OUTPUT", style="Section.TLabel").grid(
-            row=r, column=0, columnspan=3, sticky="w", **pad
-        )
-        r += 1
-
-        ttk.Label(root_frame, text="Save folder").grid(
-            row=r, column=0, sticky="w", padx=(16, 8), pady=4
-        )
-        self.outdir_var = tk.StringVar(value=str(Path(__file__).parent))
-        outdir_row = ttk.Frame(root_frame)
-        outdir_row.grid(row=r, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=4)
-        outdir_row.columnconfigure(0, weight=1)
-        ttk.Entry(outdir_row, textvariable=self.outdir_var).grid(row=0, column=0, sticky="ew")
-        ttk.Button(outdir_row, text="Browse…", command=self._browse_outdir).grid(
-            row=0, column=1, padx=(6, 0)
-        )
-        r += 1
-
-        ttk.Label(root_frame, text="Filename prefix").grid(
-            row=r, column=0, sticky="w", padx=(16, 8), pady=4
-        )
-        self.prefix_var = tk.StringVar(value="results")
-        ttk.Entry(root_frame, textvariable=self.prefix_var, width=28).grid(
-            row=r, column=1, sticky="w", padx=(0, 16), pady=4
-        )
-        r += 1
-
-        ttk.Label(root_frame, text="Export formats").grid(
-            row=r, column=0, sticky="w", padx=(16, 8), pady=4
-        )
-        fmt_row = ttk.Frame(root_frame)
-        fmt_row.grid(row=r, column=1, columnspan=2, sticky="w", padx=(0, 16), pady=4)
-        self._do_csv   = tk.BooleanVar(value=True)
-        self._do_excel = tk.BooleanVar(value=True)
-        self._do_html  = tk.BooleanVar(value=True)
-        ttk.Checkbutton(fmt_row, text="CSV",                     variable=self._do_csv).pack(side="left", padx=(0, 14))
-        ttk.Checkbutton(fmt_row, text="Excel (with thumbnails)", variable=self._do_excel).pack(side="left", padx=(0, 14))
-        ttk.Checkbutton(fmt_row, text="HTML (view in browser)",  variable=self._do_html).pack(side="left")
-        r += 1
-
-        ttk.Separator(root_frame, orient="horizontal").grid(
-            row=r, column=0, columnspan=3, sticky="ew", padx=16, pady=6
-        )
-        r += 1
-
-        # ── Action buttons ──
+        # ── Action buttons (always on-screen) ─────────────────────────────────
         btn_row = ttk.Frame(root_frame)
-        btn_row.grid(row=r, column=0, columnspan=3, sticky="ew", padx=16, pady=(0, 6))
+        btn_row.grid(row=2, column=0, columnspan=2, sticky="ew", padx=16, pady=(0, 6))
         self._search_btn = ttk.Button(
             btn_row, text="  Search  ", style="Run.TButton", command=self._run_search
         )
@@ -244,25 +129,24 @@ class App(tk.Tk):
             btn_row, text="Open results folder", command=self._open_outdir, state="disabled"
         )
         self._open_btn.pack(side="left", padx=(12, 0))
-        r += 1
 
-        # ── Progress log ──
+        # ── Progress log ───────────────────────────────────────────────────────
         self._log_widget = scrolledtext.ScrolledText(
             root_frame, height=3, state="disabled",
             font=("Consolas", 9), bg="#1e1e1e", fg="#d4d4d4",
             insertbackground="white", relief="flat",
         )
         self._log_widget.grid(
-            row=r, column=0, columnspan=3, sticky="ew", padx=16, pady=(0, 4)
+            row=3, column=0, columnspan=2, sticky="ew", padx=16, pady=(0, 4)
         )
-        r += 1
 
-        # ── Results section (only this row expands) ──
-        results_outer = ttk.LabelFrame(root_frame, text="Results — tick the rows you want to export")
-        results_outer.grid(row=r, column=0, columnspan=3, sticky="nsew", padx=16, pady=(0, 10))
+        # ── Results panel (expands to fill remaining space) ────────────────────
+        results_outer = ttk.LabelFrame(
+            root_frame, text="Results — tick the rows you want to export"
+        )
+        results_outer.grid(row=4, column=0, columnspan=2, sticky="nsew", padx=16, pady=(0, 10))
         results_outer.columnconfigure(0, weight=1)
         results_outer.rowconfigure(1, weight=1)
-        root_frame.rowconfigure(r, weight=1)
 
         ctrl_row = ttk.Frame(results_outer)
         ctrl_row.grid(row=0, column=0, sticky="w", padx=6, pady=(4, 2))
@@ -283,12 +167,147 @@ class App(tk.Tk):
         vsb.grid(row=0, column=1, sticky="ns")
 
         self._rows_frame = ttk.Frame(self._canvas)
-        self._canvas_window = self._canvas.create_window((0, 0), window=self._rows_frame, anchor="nw")
-
+        self._canvas_window = self._canvas.create_window(
+            (0, 0), window=self._rows_frame, anchor="nw"
+        )
         self._rows_frame.bind("<Configure>", self._on_rows_configure)
         self._canvas.bind("<Configure>",     self._on_canvas_configure)
         self._canvas.bind("<MouseWheel>",    self._on_mousewheel)
         self._rows_frame.bind("<MouseWheel>", self._on_mousewheel)
+
+    def _populate_form(self, form):
+        """Fill the scrollable form frame with input widgets."""
+        r = 0
+
+        # Header
+        ttk.Label(form, text="Reverse Image Search", style="Header.TLabel").grid(
+            row=r, column=0, columnspan=3, sticky="w", padx=16, pady=(12, 2)
+        )
+        r += 1
+        ttk.Label(
+            form,
+            text="Find everywhere an image appears online, then export a visual report.",
+            foreground="#666",
+        ).grid(row=r, column=0, columnspan=3, sticky="w", padx=16, pady=(0, 6))
+        r += 1
+        ttk.Separator(form, orient="horizontal").grid(
+            row=r, column=0, columnspan=3, sticky="ew", padx=16, pady=2
+        )
+        r += 1
+
+        # Image URL
+        ttk.Label(form, text="Image URL").grid(
+            row=r, column=0, sticky="w", padx=(16, 8), pady=4
+        )
+        self.url_var = tk.StringVar()
+        ttk.Entry(form, textvariable=self.url_var).grid(
+            row=r, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=4
+        )
+        r += 1
+
+        ttk.Label(form, text="— or —", foreground="#888").grid(
+            row=r, column=0, columnspan=3, pady=(2, 0)
+        )
+        r += 1
+
+        # Multi-file listbox
+        ttk.Label(form, text="Local image files").grid(
+            row=r, column=0, sticky="nw", padx=(16, 8), pady=(6, 2)
+        )
+
+        file_area = ttk.Frame(form)
+        file_area.grid(row=r, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=(4, 2))
+        file_area.columnconfigure(0, weight=1)
+
+        lb_frame = ttk.Frame(file_area)
+        lb_frame.grid(row=0, column=0, sticky="ew")
+        lb_frame.columnconfigure(0, weight=1)
+
+        self._file_listbox = tk.Listbox(
+            lb_frame, height=4, selectmode=tk.EXTENDED,
+            font=("Segoe UI", 9), activestyle="none",
+            relief="sunken", borderwidth=1,
+        )
+        lb_vsb = ttk.Scrollbar(lb_frame, orient="vertical",
+                                command=self._file_listbox.yview)
+        self._file_listbox.configure(yscrollcommand=lb_vsb.set)
+        self._file_listbox.grid(row=0, column=0, sticky="ew")
+        lb_vsb.grid(row=0, column=1, sticky="ns")
+        # Mousewheel over the file list shouldn't scroll the form
+        self._file_listbox.bind("<MouseWheel>", lambda e: "break")
+
+        lb_btns = ttk.Frame(file_area)
+        lb_btns.grid(row=1, column=0, sticky="w", pady=(4, 0))
+        ttk.Button(lb_btns, text="Add files…",      command=self._browse_images).pack(side="left", padx=(0, 6))
+        ttk.Button(lb_btns, text="Remove selected", command=self._remove_selected_files).pack(side="left", padx=(0, 6))
+        ttk.Button(lb_btns, text="Clear all",       command=self._clear_files).pack(side="left")
+        r += 1
+
+        ttk.Separator(form, orient="horizontal").grid(
+            row=r, column=0, columnspan=3, sticky="ew", padx=16, pady=6
+        )
+        r += 1
+
+        # API key
+        ttk.Label(form, text="SerpAPI key").grid(
+            row=r, column=0, sticky="w", padx=(16, 8), pady=4
+        )
+        self.key_var = tk.StringVar()
+        self._key_entry = ttk.Entry(form, textvariable=self.key_var, show="•")
+        self._key_entry.grid(row=r, column=1, sticky="ew", padx=(0, 6), pady=4)
+        self._show_key = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            form, text="Show", variable=self._show_key,
+            command=lambda: self._key_entry.config(
+                show="" if self._show_key.get() else "•"),
+        ).grid(row=r, column=2, padx=(0, 16))
+        r += 1
+
+        self._save_key = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            form, text="Remember key on this computer", variable=self._save_key
+        ).grid(row=r, column=1, sticky="w", padx=(0, 16), pady=(0, 4))
+        r += 1
+
+        ttk.Separator(form, orient="horizontal").grid(
+            row=r, column=0, columnspan=3, sticky="ew", padx=16, pady=6
+        )
+        r += 1
+
+        # Output settings
+        ttk.Label(form, text="Save folder").grid(
+            row=r, column=0, sticky="w", padx=(16, 8), pady=4
+        )
+        self.outdir_var = tk.StringVar(value=str(Path(__file__).parent))
+        outdir_row = ttk.Frame(form)
+        outdir_row.grid(row=r, column=1, columnspan=2, sticky="ew", padx=(0, 16), pady=4)
+        outdir_row.columnconfigure(0, weight=1)
+        ttk.Entry(outdir_row, textvariable=self.outdir_var).grid(row=0, column=0, sticky="ew")
+        ttk.Button(outdir_row, text="Browse…", command=self._browse_outdir).grid(
+            row=0, column=1, padx=(6, 0)
+        )
+        r += 1
+
+        ttk.Label(form, text="Filename prefix").grid(
+            row=r, column=0, sticky="w", padx=(16, 8), pady=4
+        )
+        self.prefix_var = tk.StringVar(value="results")
+        ttk.Entry(form, textvariable=self.prefix_var, width=28).grid(
+            row=r, column=1, sticky="w", padx=(0, 16), pady=4
+        )
+        r += 1
+
+        ttk.Label(form, text="Export formats").grid(
+            row=r, column=0, sticky="w", padx=(16, 8), pady=(4, 8)
+        )
+        fmt_row = ttk.Frame(form)
+        fmt_row.grid(row=r, column=1, columnspan=2, sticky="w", padx=(0, 16), pady=(4, 8))
+        self._do_csv   = tk.BooleanVar(value=True)
+        self._do_excel = tk.BooleanVar(value=True)
+        self._do_html  = tk.BooleanVar(value=True)
+        ttk.Checkbutton(fmt_row, text="CSV",                     variable=self._do_csv).pack(side="left", padx=(0, 14))
+        ttk.Checkbutton(fmt_row, text="Excel (with thumbnails)", variable=self._do_excel).pack(side="left", padx=(0, 14))
+        ttk.Checkbutton(fmt_row, text="HTML (view in browser)",  variable=self._do_html).pack(side="left")
 
     def _on_rows_configure(self, event):
         self._canvas.configure(scrollregion=self._canvas.bbox("all"))
@@ -299,7 +318,7 @@ class App(tk.Tk):
     def _on_mousewheel(self, event):
         self._canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
-    # ── Config helpers ─────────────────────────────────────────────────────────
+    # ── Config ─────────────────────────────────────────────────────────────────
 
     def _restore_saved(self):
         if "api_key" in self._config:
@@ -307,27 +326,23 @@ class App(tk.Tk):
         if "output_dir" in self._config:
             self.outdir_var.set(self._config["output_dir"])
 
-    # ── Browse / file list helpers ─────────────────────────────────────────────
+    # ── File list helpers ──────────────────────────────────────────────────────
 
     def _browse_images(self):
         paths = filedialog.askopenfilenames(
-            title="Select image files (Ctrl+click for multiple)",
+            title="Select image files — hold Ctrl or Shift to pick multiple",
             filetypes=[
                 ("Images", "*.jpg *.jpeg *.png *.gif *.webp *.bmp *.tiff"),
                 ("All files", "*.*"),
             ],
         )
         if paths:
-            added = 0
             for p in paths:
                 if p not in self._file_paths:
                     self._file_paths.append(p)
                     self._file_listbox.insert("end", os.path.basename(p))
-                    added += 1
-            if added:
-                self.url_var.set("")
-                # Scroll listbox to show the last added item
-                self._file_listbox.see("end")
+            self._file_listbox.see("end")
+            self.url_var.set("")
 
     def _remove_selected_files(self):
         for i in reversed(self._file_listbox.curselection()):
@@ -381,12 +396,11 @@ class App(tk.Tk):
         self._rows_frame.columnconfigure(2, weight=1)
         self._rows_frame.columnconfigure(3, weight=2)
 
-        # Headers
-        ttk.Label(self._rows_frame, text="",       width=2).grid(row=0, column=0, padx=(4, 0))
-        ttk.Label(self._rows_frame, text="#",      width=3, style="ColHeader.TLabel").grid(row=0, column=1, sticky="w", padx=4)
-        ttk.Label(self._rows_frame, text="Title",           style="ColHeader.TLabel").grid(row=0, column=2, sticky="w", padx=4)
-        ttk.Label(self._rows_frame, text="URL",             style="ColHeader.TLabel").grid(row=0, column=3, sticky="w", padx=4)
-        ttk.Label(self._rows_frame, text="Source",          style="ColHeader.TLabel").grid(row=0, column=4, sticky="w", padx=4)
+        ttk.Label(self._rows_frame, text="",      width=2).grid(row=0, column=0, padx=(4, 0))
+        ttk.Label(self._rows_frame, text="#",     width=3, style="ColHeader.TLabel").grid(row=0, column=1, sticky="w", padx=4)
+        ttk.Label(self._rows_frame, text="Title",          style="ColHeader.TLabel").grid(row=0, column=2, sticky="w", padx=4)
+        ttk.Label(self._rows_frame, text="URL",            style="ColHeader.TLabel").grid(row=0, column=3, sticky="w", padx=4)
+        ttk.Label(self._rows_frame, text="Source",         style="ColHeader.TLabel").grid(row=0, column=4, sticky="w", padx=4)
         if has_source:
             ttk.Label(self._rows_frame, text="From", style="ColHeader.TLabel").grid(row=0, column=5, sticky="w", padx=4)
 
@@ -400,7 +414,8 @@ class App(tk.Tk):
             var = tk.BooleanVar(value=True)
             self._result_vars.append(var)
 
-            cb = ttk.Checkbutton(self._rows_frame, variable=var, command=self._update_result_count)
+            cb = ttk.Checkbutton(self._rows_frame, variable=var,
+                                 command=self._update_result_count)
             cb.grid(row=row, column=0, padx=(6, 0), pady=1, sticky="w")
             cb.bind("<MouseWheel>", self._on_mousewheel)
 
@@ -416,8 +431,8 @@ class App(tk.Tk):
             t.bind("<MouseWheel>", self._on_mousewheel)
 
             url = result.get("url", "") or "—"
-            url_display = url if len(url) <= 80 else url[:77] + "…"
-            u = ttk.Label(self._rows_frame, text=url_display, foreground="#1a0dab", anchor="w")
+            url_d = url if len(url) <= 80 else url[:77] + "…"
+            u = ttk.Label(self._rows_frame, text=url_d, foreground="#1a0dab", anchor="w")
             u.grid(row=row, column=3, sticky="ew", padx=4, pady=1)
             u.bind("<MouseWheel>", self._on_mousewheel)
 
@@ -429,10 +444,10 @@ class App(tk.Tk):
             s.bind("<MouseWheel>", self._on_mousewheel)
 
             if has_source:
-                from_text = result.get("source_image", "") or "—"
-                if len(from_text) > 28:
-                    from_text = from_text[:25] + "…"
-                f = ttk.Label(self._rows_frame, text=from_text, foreground="#555", width=24)
+                ft = result.get("source_image", "") or "—"
+                if len(ft) > 28:
+                    ft = ft[:25] + "…"
+                f = ttk.Label(self._rows_frame, text=ft, foreground="#555", width=24)
                 f.grid(row=row, column=5, sticky="w", padx=(4, 8), pady=1)
                 f.bind("<MouseWheel>", self._on_mousewheel)
 
@@ -453,7 +468,7 @@ class App(tk.Tk):
         if not self._result_vars:
             self._result_count_label.config(text="No results yet")
             return
-        n = sum(1 for v in self._result_vars if v.get())
+        n     = sum(1 for v in self._result_vars if v.get())
         total = len(self._result_vars)
         self._result_count_label.config(text=f"{n} of {total} selected")
 
@@ -511,15 +526,12 @@ class App(tk.Tk):
 
         try:
             for i, (kind, src) in enumerate(sources, 1):
-                label = os.path.basename(src) if kind == "file" else src
+                label  = os.path.basename(src) if kind == "file" else src
                 prefix = f"[{i}/{len(sources)}] " if multi else ""
                 self.after(0, self._log, f"{prefix}Searching: {label}")
 
-                if kind == "file":
-                    data = upload_and_search(src, api_key)
-                else:
-                    data = search_reverse_image(src, api_key)
-
+                data    = upload_and_search(src, api_key) if kind == "file" \
+                          else search_reverse_image(src, api_key)
                 results = parse_results(data)
 
                 if multi:
@@ -527,7 +539,8 @@ class App(tk.Tk):
                         res["source_image"] = os.path.basename(src)
 
                 all_results.extend(results)
-                self.after(0, self._log, f"  → {len(results)} result{'s' if len(results) != 1 else ''}")
+                self.after(0, self._log,
+                           f"  → {len(results)} result{'s' if len(results) != 1 else ''}")
 
             if not all_results:
                 self.after(0, self._log, "\nNo results returned.")
@@ -535,7 +548,7 @@ class App(tk.Tk):
                 return
 
             total = len(all_results)
-            msg = f"\nFound {total} result{'s' if total != 1 else ''}"
+            msg   = f"\nFound {total} result{'s' if total != 1 else ''}"
             if multi:
                 msg += f" across {len(sources)} images"
             msg += ". Tick the ones you want, then click 'Export Selected'."
@@ -556,7 +569,7 @@ class App(tk.Tk):
         selected = [r for r, v in zip(self._results, self._result_vars) if v.get()]
 
         if not selected:
-            messagebox.showerror("Nothing selected", "Please tick at least one result to export.")
+            messagebox.showerror("Nothing selected", "Please tick at least one result.")
             return
 
         outdir = self.outdir_var.get().strip()
@@ -566,7 +579,7 @@ class App(tk.Tk):
             messagebox.showerror("Invalid folder", "Please choose a valid output folder.")
             return
         if not (self._do_csv.get() or self._do_excel.get() or self._do_html.get()):
-            messagebox.showerror("No format selected", "Please select at least one export format.")
+            messagebox.showerror("No format", "Please select at least one export format.")
             return
 
         self._config["output_dir"] = outdir
@@ -591,7 +604,8 @@ class App(tk.Tk):
                 self.after(0, self._log, f"CSV saved:   {path}")
 
             if self._do_excel.get():
-                self.after(0, self._log, "Downloading thumbnails for Excel — this may take 30–60 seconds…")
+                self.after(0, self._log,
+                           "Downloading thumbnails for Excel — this may take 30–60 s…")
                 path = f"{out_prefix}.xlsx"
                 export_excel(results, path)
                 self.after(0, self._log, f"Excel saved: {path}")
@@ -601,7 +615,9 @@ class App(tk.Tk):
                 export_html(results, path, self._source_label)
                 self.after(0, self._log, f"HTML saved:  {path}")
 
-            self.after(0, self._log, f"\nExported {len(results)} results. Click 'Open results folder' to view.")
+            self.after(0, self._log,
+                       f"\nExported {len(results)} results. "
+                       "Click 'Open results folder' to view.")
             self.after(0, lambda: self._open_btn.config(state="normal"))
 
         except Exception as e:
