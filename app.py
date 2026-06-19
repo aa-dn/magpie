@@ -1092,10 +1092,7 @@ _HTML = """<!DOCTYPE html>
   <!-- Birdhouse -->
   <div class="birdhouse-section" id="birdhouse-section" style="display:none">
     <div class="birdhouse-hdr">
-      <div class="birdhouse-title">
-        <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75" style="flex-shrink:0">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"/>
-        </svg>
+      <div class="birdhouse-title"> C:/Users/AmeliaDiNardo/OneDrive - INSTITUTE FOR STRATEGIC DIALOGUE/Documents/Claude Code Projects/magpie [reverse image search]/static/bird-house-icon.svg
         <span class="num" id="bh-total">0</span>&nbsp;in the Birdhouse
       </div>
       <div class="dl-btns">
@@ -1144,7 +1141,9 @@ _HTML = """<!DOCTYPE html>
   let _singleResults = [];
   let _bulkSections = [];
   let _bulkSourceLabels = [];
-  let _birdhouse = [];
+  let _birdhouse = (() => {
+    try { return JSON.parse(localStorage.getItem('magpie_birdhouse') || '[]'); } catch { return []; }
+  })();
   let _searchUrl = null;
   let _searchStart = 0;
   const _PAGE_SIZE = 59;
@@ -1711,8 +1710,13 @@ _HTML = """<!DOCTYPE html>
     } catch {}
   }
   refreshCredits();
+  renderBirdhouse();
 
   // ── Birdhouse ──────────────────────────────────────────────────────────────
+  function _bhSave() {
+    try { localStorage.setItem('magpie_birdhouse', JSON.stringify(_birdhouse)); } catch {}
+  }
+
   function saveToBirdhouse(scope) {
     let results = [], sourceImage = '';
     if (scope === 'main') {
@@ -1735,6 +1739,7 @@ _HTML = """<!DOCTYPE html>
     const savedAt = `${pad(now.getHours())}:${pad(now.getMinutes())} on ${pad(now.getDate())}/${pad(now.getMonth()+1)}/${now.getFullYear()}`;
     results.forEach(r => { r.source_image = sourceImage; r.birdhouse_saved = savedAt; });
     _birdhouse.push({ source_image: sourceImage, saved_at: savedAt, results });
+    _bhSave();
     renderBirdhouse();
     showBhToast(`${results.length} result${results.length !== 1 ? 's' : ''} saved to the Birdhouse`);
   }
@@ -1785,12 +1790,13 @@ _HTML = """<!DOCTYPE html>
     toggle.classList.toggle('open', open);
   }
 
-  function removeBatch(idx) { _birdhouse.splice(idx, 1); renderBirdhouse(); }
+  function removeBatch(idx) { _birdhouse.splice(idx, 1); _bhSave(); renderBirdhouse(); }
 
   function clearBirdhouse() {
     if (!_birdhouse.length) return;
-    if (!confirm('Clear the entire Birdhouse? This cannot be undone.')) return;
+    if (!confirm('Are you sure you want to clear the Birdhouse? This is his home!! :(')) return;
     _birdhouse = [];
+    _bhSave();
     renderBirdhouse();
   }
 
