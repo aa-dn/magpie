@@ -788,6 +788,78 @@ _HTML = """<!DOCTYPE html>
   .section-sel-bar .sel-btn { font-size: .75rem; padding: 2px 8px; border-radius: 5px; border: 1px solid var(--gray-200); background: #fff; cursor: pointer; color: var(--gray-600); }
   .section-sel-bar .sel-export { font-size: .75rem; padding: 2px 8px; border-radius: 5px; border: 1px solid var(--brand); background: #fff; cursor: pointer; color: var(--brand); font-weight: 500; }
   .section-sel-bar .sel-export:hover { background: var(--brand); color: #fff; }
+  #open-tabs-btn {
+    position: fixed; bottom: 16px; right: 16px; z-index: 200;
+    display: none; align-items: center; gap: 7px;
+    background: linear-gradient(135deg, var(--brand) 0%, var(--brand-light) 100%); color: #fff;
+    font-size: .78rem; font-weight: 600; font-family: inherit;
+    padding: 9px 16px; border-radius: 999px; border: none; cursor: pointer;
+    box-shadow: 0 2px 14px rgba(124,58,237,.4);
+    transition: filter .15s, transform .15s, box-shadow .15s;
+  }
+  #open-tabs-btn:hover { filter: brightness(1.12); transform: translateY(-1px); box-shadow: 0 4px 20px rgba(124,58,237,.55); }
+  #open-tabs-btn svg { flex-shrink: 0; }
+
+  /* ── Birdhouse ── */
+  .bh-header-badge {
+    display: none; align-items: center; gap: 5px; margin-left: auto;
+    padding: 5px 13px; border-radius: 999px; cursor: pointer; font-family: inherit;
+    background: linear-gradient(135deg, #7c3aed, #a855f7); color: #fff;
+    font-size: .75rem; font-weight: 600; border: none;
+    box-shadow: 0 1px 6px rgba(124,58,237,.3); transition: filter .15s;
+  }
+  .bh-header-badge.visible { display: flex; }
+  .bh-header-badge:hover { filter: brightness(1.1); }
+  .save-bh-btn {
+    font-size: .78rem; padding: 3px 10px; border-radius: 6px;
+    background: linear-gradient(135deg, #7c3aed, #a855f7); color: #fff;
+    border: none; cursor: pointer; font-weight: 500; font-family: inherit;
+    display: inline-flex; align-items: center; gap: 4px; transition: filter .15s;
+  }
+  .save-bh-btn:hover { filter: brightness(1.1); }
+  .birdhouse-section { margin-top: 1.5rem; animation: fadeUp .3s ease; }
+  .birdhouse-hdr {
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: .75rem; margin-bottom: 1rem;
+  }
+  .birdhouse-title { font-size: 1rem; font-weight: 600; color: var(--gray-900); display: flex; align-items: center; gap: .5rem; }
+  .birdhouse-title .num {
+    font-size: 1.75rem; font-weight: 700; line-height: 1;
+    background: linear-gradient(135deg, #7c3aed, #a855f7);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  }
+  .batch-card { background: #fff; border: 1px solid var(--gray-100); border-radius: .75rem; margin-bottom: .625rem; overflow: hidden; box-shadow: var(--shadow); }
+  .batch-card-hdr {
+    display: flex; align-items: center; gap: .75rem; padding: .75rem 1rem;
+    background: var(--gray-50); cursor: pointer; user-select: none; transition: background .15s;
+  }
+  .batch-card-hdr:hover { background: var(--gray-100); }
+  .batch-src-img { width: 2.5rem; height: 2.5rem; object-fit: cover; border-radius: .375rem; flex-shrink: 0; background: var(--gray-200); }
+  .batch-src-lbl { font-size: .8125rem; font-weight: 500; color: var(--gray-700); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .batch-meta { font-size: .75rem; color: var(--gray-400); flex-shrink: 0; white-space: nowrap; }
+  .batch-toggle { font-size: .7rem; color: var(--gray-400); transition: transform .2s; flex-shrink: 0; }
+  .batch-toggle.open { transform: rotate(90deg); }
+  .batch-remove-btn {
+    width: 1.5rem; height: 1.5rem; border: none; background: none; cursor: pointer;
+    color: var(--gray-400); border-radius: 50%; display: flex; align-items: center;
+    justify-content: center; padding: 0; flex-shrink: 0; transition: background .15s, color .15s;
+  }
+  .batch-remove-btn:hover { background: var(--gray-200); color: var(--gray-700); }
+  .batch-body { display: none; }
+  .batch-body.open { display: block; }
+  .batch-result-row { display: flex; align-items: center; gap: .75rem; padding: .5rem 1rem; border-top: 1px solid var(--gray-50); font-size: .8125rem; }
+  .batch-result-row:hover { background: var(--gray-50); }
+  .batch-result-num { color: var(--gray-400); width: 1.5rem; flex-shrink: 0; text-align: right; font-size: .75rem; }
+  .batch-result-title { flex: 1; min-width: 0; }
+  .batch-result-title a { color: var(--gray-800); text-decoration: none; font-weight: 500; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+  .batch-result-title a:hover { color: var(--brand); }
+  .bh-toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(8px);
+    z-index: 300; background: #111827; color: #fff; font-size: .78rem; font-weight: 500;
+    padding: 8px 16px; border-radius: 8px; white-space: nowrap;
+    opacity: 0; transition: opacity .2s, transform .2s; pointer-events: none;
+  }
+  .bh-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   </style>
 </head>
 <body>
@@ -803,6 +875,12 @@ _HTML = """<!DOCTYPE html>
       <div class="brand-name">Image Intelligence</div>
       <div class="brand-sub">ISD · Reverse Image Search</div>
     </div>
+    <button class="bh-header-badge" id="bh-header-badge" onclick="document.getElementById(\'birdhouse-section\').scrollIntoView({behavior:\'smooth\'})">
+      <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"/>
+      </svg>
+      Birdhouse &middot; <span id="bh-header-count">0</span>
+    </button>
   </div>
 </header>
 
@@ -946,6 +1024,10 @@ _HTML = """<!DOCTYPE html>
       <button class="sel-export" onclick="exportSelected('main','csv')">↓ CSV</button>
       <button class="sel-export" onclick="exportSelected('main','xlsx')">↓ Excel</button>
       <button class="sel-export" onclick="exportSelected('main','html')">↓ HTML</button>
+      <button class="save-bh-btn" onclick="saveToBirdhouse('main')">
+        <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+        Save to Birdhouse
+      </button>
     </div>
     <div class="table-wrap">
       <table>
@@ -1007,7 +1089,47 @@ _HTML = """<!DOCTYPE html>
     <div id="bulk-sections"></div>
   </div>
 
+  <!-- Birdhouse -->
+  <div class="birdhouse-section" id="birdhouse-section" style="display:none">
+    <div class="birdhouse-hdr">
+      <div class="birdhouse-title">
+        <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75" style="flex-shrink:0">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"/>
+        </svg>
+        <span class="num" id="bh-total">0</span>&nbsp;in the Birdhouse
+      </div>
+      <div class="dl-btns">
+        <button class="dl-btn" onclick="exportBirdhouse(\'csv\')">
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+          CSV
+        </button>
+        <button class="dl-btn" onclick="exportBirdhouse(\'xlsx\')">
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+          Excel
+        </button>
+        <button class="dl-btn" onclick="exportBirdhouse(\'html\')">
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
+          HTML Report
+        </button>
+        <button class="new-search-btn" onclick="clearBirdhouse()">
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          Clear
+        </button>
+      </div>
+    </div>
+    <div id="bh-batches"></div>
+  </div>
+
 </main>
+
+<div id="bh-toast" class="bh-toast"></div>
+
+<button id="open-tabs-btn" onclick="openCheckedTabs()" title="Open all checked results in new tabs">
+  <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+    <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/>
+  </svg>
+  Open <span id="otb-count">0</span> in tabs
+</button>
 
 <div id="credit-widget" onclick="refreshCredits()" title="SerpAPI credits remaining — click to refresh">
   <span class="cw-dot"></span>
@@ -1021,6 +1143,8 @@ _HTML = """<!DOCTYPE html>
   let chosenFile = null;
   let _singleResults = [];
   let _bulkSections = [];
+  let _bulkSourceLabels = [];
+  let _birdhouse = [];
   let _searchUrl = null;
   let _searchStart = 0;
   const _PAGE_SIZE = 59;
@@ -1166,6 +1290,7 @@ _HTML = """<!DOCTYPE html>
 
       const sIdx = idx;
       _bulkSections[sIdx] = s.results || [];
+      _bulkSourceLabels[sIdx] = s.source_label || `Image ${sIdx + 1}`;
 
       section.innerHTML = `
         <div class="section-header" onclick="toggleSection(this)">
@@ -1186,6 +1311,10 @@ _HTML = """<!DOCTYPE html>
             <button class="sel-export" onclick="exportSelected('bulk-${sIdx}','csv')">↓ CSV</button>
             <button class="sel-export" onclick="exportSelected('bulk-${sIdx}','xlsx')">↓ Excel</button>
             <button class="sel-export" onclick="exportSelected('bulk-${sIdx}','html')">↓ HTML</button>
+            <button class="save-bh-btn" onclick="saveToBirdhouse('bulk-${sIdx}')">
+              <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
+              Save to Birdhouse
+            </button>
           </div>
           <div class="table-wrap" style="border-radius:0;border:none;border-top:1px solid var(--gray-100)">
             <table>
@@ -1427,6 +1556,7 @@ _HTML = """<!DOCTYPE html>
     document.getElementById('main-sel-count').textContent = `${on.length} of ${all.length} selected`;
     const hdr = document.getElementById('sel-all-main');
     if (hdr) hdr.indeterminate = on.length > 0 && on.length < all.length;
+    updateOpenTabsBtn();
   }
 
   function toggleAllBulk(sIdx, checked) {
@@ -1439,6 +1569,7 @@ _HTML = """<!DOCTYPE html>
     const on  = document.querySelectorAll(`#bulk-tbody-${sIdx} .result-cb:checked`);
     const el  = document.getElementById(`bulk-sel-count-${sIdx}`);
     if (el) el.textContent = `${on.length} of ${all.length} selected`;
+    updateOpenTabsBtn();
   }
 
   async function exportSelected(scope, fmt) {
@@ -1470,6 +1601,37 @@ _HTML = """<!DOCTYPE html>
       document.body.appendChild(a); a.click();
       document.body.removeChild(a); URL.revokeObjectURL(url);
     } catch { showError('Export failed — please try again.'); }
+  }
+
+  // ── Open in tabs ────────────────────────────────────────────────────────────
+  function updateOpenTabsBtn() {
+    let count = 0;
+    document.querySelectorAll('#results-tbody tr[data-idx]:not(.filtered-out) .result-cb:checked').forEach(() => count++);
+    document.querySelectorAll('[id^="bulk-tbody-"] tr[data-idx] .result-cb:checked').forEach(() => count++);
+    const btn = document.getElementById('open-tabs-btn');
+    if (!btn) return;
+    document.getElementById('otb-count').textContent = count;
+    btn.style.display = count > 0 ? 'flex' : 'none';
+  }
+
+  function openCheckedTabs() {
+    const urls = [];
+    document.querySelectorAll('#results-tbody tr[data-idx]:not(.filtered-out)').forEach(row => {
+      if (row.querySelector('.result-cb')?.checked) {
+        const r = _singleResults[parseInt(row.dataset.idx)];
+        if (r?.url) urls.push(r.url);
+      }
+    });
+    document.querySelectorAll('[id^="bulk-tbody-"]').forEach(tbody => {
+      const sIdx = parseInt(tbody.id.replace('bulk-tbody-', ''));
+      tbody.querySelectorAll('tr[data-idx]').forEach(row => {
+        if (row.querySelector('.result-cb')?.checked) {
+          const r = _bulkSections[sIdx]?.[parseInt(row.dataset.idx)];
+          if (r?.url) urls.push(r.url);
+        }
+      });
+    });
+    urls.forEach(url => window.open(url, '_blank', 'noopener'));
   }
 
   // ── Downloads ──────────────────────────────────────────────────────────────
@@ -1550,6 +1712,114 @@ _HTML = """<!DOCTYPE html>
   }
   refreshCredits();
 
+  // ── Birdhouse ──────────────────────────────────────────────────────────────
+  function saveToBirdhouse(scope) {
+    let results = [], sourceImage = '';
+    if (scope === 'main') {
+      document.querySelectorAll('#results-tbody tr[data-idx]:not(.filtered-out)').forEach(row => {
+        if (row.querySelector('.result-cb')?.checked)
+          results.push(Object.assign({}, _singleResults[parseInt(row.dataset.idx)]));
+      });
+      sourceImage = _searchUrl || '';
+    } else {
+      const sIdx = parseInt(scope.replace('bulk-', ''));
+      document.querySelectorAll(`#bulk-tbody-${sIdx} tr[data-idx]`).forEach(row => {
+        if (row.querySelector('.result-cb')?.checked)
+          results.push(Object.assign({}, (_bulkSections[sIdx] || [])[parseInt(row.dataset.idx)]));
+      });
+      sourceImage = _bulkSourceLabels[sIdx] || '';
+    }
+    if (!results.length) { alert('Please tick at least one result first.'); return; }
+    const now = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const savedAt = `${pad(now.getHours())}:${pad(now.getMinutes())} on ${pad(now.getDate())}/${pad(now.getMonth()+1)}/${now.getFullYear()}`;
+    results.forEach(r => { r.source_image = sourceImage; r.birdhouse_saved = savedAt; });
+    _birdhouse.push({ source_image: sourceImage, saved_at: savedAt, results });
+    renderBirdhouse();
+    showBhToast(`${results.length} result${results.length !== 1 ? 's' : ''} saved to the Birdhouse`);
+  }
+
+  function renderBirdhouse() {
+    const total = _birdhouse.reduce((s, b) => s + b.results.length, 0);
+    document.getElementById('bh-total').textContent = total;
+    document.getElementById('bh-header-count').textContent = total;
+    document.getElementById('bh-header-badge').classList.toggle('visible', total > 0);
+    const section = document.getElementById('birdhouse-section');
+    section.style.display = total > 0 ? 'block' : 'none';
+    const container = document.getElementById('bh-batches');
+    container.innerHTML = '';
+    _birdhouse.forEach((batch, idx) => {
+      const card = document.createElement('div');
+      card.className = 'batch-card';
+      const isUrl = /^https?:\\/\\//.test(batch.source_image);
+      const imgHtml = isUrl
+        ? `<img class="batch-src-img" src="${h(batch.source_image)}" onerror="this.style.display=\\'none\\'" alt="">`
+        : `<div class="batch-src-img" style="display:flex;align-items:center;justify-content:center;font-size:.65rem;color:var(--gray-400);font-weight:600">FILE</div>`;
+      const srcLabel = batch.source_image || 'Unknown source';
+      const shortSrc = srcLabel.length > 55 ? srcLabel.slice(0, 52) + '\\u2026' : srcLabel;
+      const rowsHtml = batch.results.map((r, i) =>
+        `<div class="batch-result-row">
+          <span class="batch-result-num">${i + 1}</span>
+          <span class="batch-result-title">${r.url ? `<a href="${h(r.url)}" target="_blank" rel="noopener">${h(r.title || r.url)}</a>` : h(r.title || '\\u2014')}</span>
+          <span style="font-size:.72rem;color:var(--gray-400);flex-shrink:0">${h(r.source || '')}</span>
+        </div>`).join('');
+      card.innerHTML = `
+        <div class="batch-card-hdr" onclick="toggleBatch(this)">
+          <span class="batch-toggle">&#x25b6;</span>
+          ${imgHtml}
+          <span class="batch-src-lbl" title="${h(srcLabel)}">${h(shortSrc)}</span>
+          <span class="batch-meta">${batch.results.length} result${batch.results.length !== 1 ? 's' : ''} &middot; ${h(batch.saved_at)}</span>
+          <button class="batch-remove-btn" onclick="event.stopPropagation();removeBatch(${idx})" title="Remove">
+            <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <div class="batch-body">${rowsHtml}</div>`;
+      container.appendChild(card);
+    });
+  }
+
+  function toggleBatch(hdr) {
+    const body = hdr.nextElementSibling;
+    const toggle = hdr.querySelector('.batch-toggle');
+    const open = body.classList.toggle('open');
+    toggle.classList.toggle('open', open);
+  }
+
+  function removeBatch(idx) { _birdhouse.splice(idx, 1); renderBirdhouse(); }
+
+  function clearBirdhouse() {
+    if (!_birdhouse.length) return;
+    if (!confirm('Clear the entire Birdhouse? This cannot be undone.')) return;
+    _birdhouse = [];
+    renderBirdhouse();
+  }
+
+  async function exportBirdhouse(fmt) {
+    const allResults = _birdhouse.flatMap(b => b.results);
+    if (!allResults.length) return;
+    try {
+      const resp = await fetch('/api/export-selection', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ results: allResults, fmt })
+      });
+      if (!resp.ok) { const d = await resp.json(); showError(d.detail || 'Export failed.'); return; }
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `birdhouse.${fmt}`;
+      document.body.appendChild(a); a.click();
+      document.body.removeChild(a); URL.revokeObjectURL(url);
+    } catch { showError('Export failed — please try again.'); }
+  }
+
+  function showBhToast(msg) {
+    const t = document.getElementById('bh-toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2500);
+  }
+
   // ── Clear / reset ──────────────────────────────────────────────────────────
   function clearResults() {
     // Hide results panels and error
@@ -1560,6 +1830,7 @@ _HTML = """<!DOCTYPE html>
     // Clear result data
     _singleResults = [];
     _bulkSections  = [];
+    _bulkSourceLabels = [];
     searchId       = null;
     bulkSearchIds  = [];
     _searchUrl     = null;
@@ -1572,6 +1843,7 @@ _HTML = """<!DOCTYPE html>
     if (lmw) lmw.style.display = 'none';
     document.getElementById('results-tbody').innerHTML = '';
     document.getElementById('bulk-sections').innerHTML = '';
+    updateOpenTabsBtn();
 
     // Clear URL textarea and single-file input
     document.getElementById('url-input').value = '';
