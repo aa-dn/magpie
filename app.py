@@ -1092,7 +1092,8 @@ _HTML = """<!DOCTYPE html>
   <!-- Birdhouse -->
   <div class="birdhouse-section" id="birdhouse-section" style="display:none">
     <div class="birdhouse-hdr">
-      <div class="birdhouse-title"> C:/Users/AmeliaDiNardo/OneDrive - INSTITUTE FOR STRATEGIC DIALOGUE/Documents/Claude Code Projects/magpie [reverse image search]/static/bird-house-icon.svg
+      <div class="birdhouse-title">
+        <img src="/static/birdhouseicon.png" style="height:2rem;width:auto;flex-shrink:0" alt="">
         <span class="num" id="bh-total">0</span>&nbsp;in the Birdhouse
       </div>
       <div class="dl-btns">
@@ -1734,14 +1735,25 @@ _HTML = """<!DOCTYPE html>
       sourceImage = _bulkSourceLabels[sIdx] || '';
     }
     if (!results.length) { alert('Please tick at least one result first.'); return; }
+    const existingUrls = new Set(_birdhouse.flatMap(b => b.results.map(r => r.url)).filter(Boolean));
+    const dupes = results.filter(r => r.url && existingUrls.has(r.url));
+    const fresh = results.filter(r => !r.url || !existingUrls.has(r.url));
+    if (!fresh.length) {
+      showBhToast(`⚠️ All ${results.length} already in the Birdhouse — none saved`);
+      return;
+    }
     const now = new Date();
     const pad = n => String(n).padStart(2, '0');
     const savedAt = `${pad(now.getHours())}:${pad(now.getMinutes())} on ${pad(now.getDate())}/${pad(now.getMonth()+1)}/${now.getFullYear()}`;
-    results.forEach(r => { r.source_image = sourceImage; r.birdhouse_saved = savedAt; });
-    _birdhouse.push({ source_image: sourceImage, saved_at: savedAt, results });
+    fresh.forEach(r => { r.source_image = sourceImage; r.birdhouse_saved = savedAt; });
+    _birdhouse.push({ source_image: sourceImage, saved_at: savedAt, results: fresh });
     _bhSave();
     renderBirdhouse();
-    showBhToast(`${results.length} result${results.length !== 1 ? 's' : ''} saved to the Birdhouse`);
+    if (dupes.length) {
+      showBhToast(`${fresh.length} saved — ⚠️ ${dupes.length} duplicate${dupes.length !== 1 ? 's' : ''} skipped`);
+    } else {
+      showBhToast(`${fresh.length} result${fresh.length !== 1 ? 's' : ''} saved to the Birdhouse`);
+    }
   }
 
   function renderBirdhouse() {
