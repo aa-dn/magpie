@@ -225,6 +225,27 @@
       transition: border-color .15s, color .15s, background .15s;
     }
     .dl-btn:hover { border-color: var(--brand-light); color: var(--brand); background: var(--brand-50); }
+    .new-search-btn {
+      display: inline-flex; align-items: center; gap: .375rem;
+      padding: .4375rem .875rem;
+      border: 1.5px solid var(--gray-200); border-radius: .5rem;
+      font-size: .8125rem; font-weight: 500; font-family: inherit;
+      color: var(--gray-500); background: #fff; cursor: pointer;
+      transition: border-color .15s, color .15s, background .15s;
+    }
+    .new-search-btn:hover { border-color: var(--gray-400); color: var(--gray-700); background: var(--gray-50); }
+    .engine-error-bar { display: none; align-items: flex-start; gap: 8px; padding: 8px 16px; background: #fffbeb; border-bottom: 1px solid #fde68a; font-size: .8rem; color: #92400e; line-height: 1.4; }
+    .engine-picker { display: flex; align-items: center; gap: 6px; margin-top: 1rem; flex-wrap: wrap; }
+    .engine-picker label { font-size: .78rem; color: rgba(255,255,255,.65); margin-right: 4px; }
+    .engine-pill input { display: none; }
+    .engine-pill span {
+      display: inline-block; padding: 4px 12px; border-radius: 999px; cursor: pointer;
+      font-size: .78rem; font-weight: 500; border: 1.5px solid rgba(255,255,255,.35);
+      color: rgba(255,255,255,.7); background: rgba(255,255,255,.08);
+      transition: background .15s, border-color .15s, color .15s;
+      user-select: none;
+    }
+    .engine-pill input:checked + span { background: rgba(255,255,255,.22); border-color: rgba(255,255,255,.8); color: #fff; }
 
     /* ── Table ── */
     .table-wrap {
@@ -347,6 +368,19 @@
       th.col-thumb, td:nth-child(2) { display: none; }
     }
     #url-input::placeholder { color: rgba(255,255,255,.45); }
+  .col-cb { width: 36px; text-align: center; }
+  .result-cb { width: 16px; height: 16px; cursor: pointer; accent-color: var(--brand); }
+  .sel-bar { display: flex; align-items: center; gap: 10px; padding: 8px 16px; background: var(--gray-50); border-bottom: 1px solid var(--gray-100); flex-wrap: wrap; }
+  .sel-bar .sel-count { font-size: .82rem; color: var(--gray-500); margin-right: auto; }
+  .sel-bar .sel-btn { font-size: .78rem; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--gray-200); background: #fff; cursor: pointer; color: var(--gray-600); }
+  .sel-bar .sel-btn:hover { background: var(--gray-50); border-color: var(--gray-300); }
+  .sel-bar .sel-export { font-size: .78rem; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--brand); background: #fff; cursor: pointer; color: var(--brand); font-weight: 500; }
+  .sel-bar .sel-export:hover { background: var(--brand); color: #fff; }
+  .section-sel-bar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; flex-wrap: wrap; border-top: 1px solid var(--gray-100); background: var(--gray-50); }
+  .section-sel-bar .sel-count { font-size: .78rem; color: var(--gray-500); margin-right: auto; }
+  .section-sel-bar .sel-btn { font-size: .75rem; padding: 2px 8px; border-radius: 5px; border: 1px solid var(--gray-200); background: #fff; cursor: pointer; color: var(--gray-600); }
+  .section-sel-bar .sel-export { font-size: .75rem; padding: 2px 8px; border-radius: 5px; border: 1px solid var(--brand); background: #fff; cursor: pointer; color: var(--brand); font-weight: 500; }
+  .section-sel-bar .sel-export:hover { background: var(--brand); color: #fff; }
   </style>
 </head>
 <body>
@@ -371,7 +405,7 @@
   <div class="hero hero--with-image">
     <div class="hero-img"><img src="https://i.ibb.co/v6J9vxqV/magpie.png" alt=""></div>
     <div class="hero-text">
-      <h2>Upload or link an image and this little <span class="grad">magpie</span> will go collect similar photos from Google, Yandex, and Bing for you.</span><br></h2>
+      <h2>Upload or link an image and this little <span class="grad">magpie</span> will go collect similar photos from Google for you.</span><br></h2>
       <p>Use him to find other instances of a picture across the web. Download results per photo, or all results combined. <br> (Take results with a grain of salt; he's only a bird.) 
 </p>
     </div>
@@ -456,6 +490,10 @@
         <span class="num" id="result-num">0</span> results found
       </div>
       <div class="dl-btns">
+        <button class="new-search-btn" onclick="clearResults()">
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          New search
+        </button>
         <button class="dl-btn" onclick="dl('csv')">
           <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
             <path stroke-linecap="round" stroke-linejoin="round"
@@ -480,6 +518,15 @@
       </div>
     </div>
 
+    <div class="engine-error-bar" id="engine-error-bar"></div>
+    <div class="sel-bar" id="main-sel-bar">
+      <button class="sel-btn" onclick="toggleAllMain(true)">Select all</button>
+      <button class="sel-btn" onclick="toggleAllMain(false)">Select none</button>
+      <span class="sel-count" id="main-sel-count">0 selected</span>
+      <button class="sel-export" onclick="exportSelected('main','csv')">↓ CSV</button>
+      <button class="sel-export" onclick="exportSelected('main','xlsx')">↓ Excel</button>
+      <button class="sel-export" onclick="exportSelected('main','html')">↓ HTML</button>
+    </div>
     <div class="table-wrap">
       <table>
         <colgroup>
@@ -491,6 +538,7 @@
         </colgroup>
         <thead>
           <tr>
+            <th class="col-cb"><input type="checkbox" id="sel-all-main" class="result-cb" onchange="toggleAllMain(this.checked)" checked title="Select all"></th>
             <th class="col-n">#</th>
             <th class="col-thumb">Preview</th>
             <th>Title</th>
@@ -511,6 +559,10 @@
         <span class="num" id="bulk-total-count">0</span> total results
       </div>
       <div class="dl-btns">
+        <button class="new-search-btn" onclick="clearResults()">
+          <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+          New search
+        </button>
         <button class="dl-btn" onclick="dlAllCombined('csv')">
           <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"/></svg>
           All · CSV
@@ -534,6 +586,8 @@
   let searchId = null;
   let activeTab = 'url';
   let chosenFile = null;
+  let _singleResults = [];
+  let _bulkSections = [];
 
   // ── Tab switching ──────────────────────────────────────────────────────────
   function switchTab(tab) {
@@ -640,6 +694,7 @@
     try {
       const fd = new FormData();
       bulkFiles.forEach(f => fd.append('files', f));
+      fd.append('engines', getEngineChoice());
       const resp = await fetch('/api/bulk-search', { method: 'POST', body: fd });
       const data = await resp.json();
       if (!resp.ok) { showError(data.detail || 'An unexpected error occurred.'); return; }
@@ -665,28 +720,8 @@
       const label = s.source_label || `Image ${idx + 1}`;
       const shortLabel = label.length > 60 ? label.slice(0, 57) + '…' : label;
 
-      let tableRows = '';
-      if (!s.results || !s.results.length) {
-        tableRows = `<tr><td colspan="5"><div class="empty" style="padding:2rem"><p>No results found.</p></div></td></tr>`;
-      } else {
-        s.results.forEach((r, i) => {
-          const thumbCell = r.thumbnail
-            ? `<img class="thumb-img" src="${h(r.thumbnail)}" alt="" loading="lazy" onerror="this.style.display='none'">`
-            : `<div class="thumb-empty"></div>`;
-          const titleCell = r.url
-            ? `<a class="title-link" href="${h(r.url)}" target="_blank" rel="noopener">${h(r.title || r.url)}</a>`
-            : `<span style="color:var(--gray-400)">${h(r.title || '—')}</span>`;
-          const engineClass = r.engine && r.engine.includes('·') ? 'multi' : r.engine === 'Yandex' ? 'yandex' : r.engine === 'Bing' ? 'bing' : 'google';
-          const badge = r.engine ? `<span class="engine-badge ${engineClass}">${h(r.engine)}</span>` : '—';
-          tableRows += `<tr>
-            <td><span class="row-num">${i + 1}</span></td>
-            <td>${thumbCell}</td>
-            <td>${titleCell}</td>
-            <td><span class="source-text">${h(r.source || '—')}</span></td>
-            <td>${badge}</td>
-          </tr>`;
-        });
-      }
+      const sIdx = idx;
+      _bulkSections[sIdx] = s.results || [];
 
       section.innerHTML = `
         <div class="section-header" onclick="toggleSection(this)">
@@ -700,14 +735,52 @@
             <button class="dl-btn" onclick="dlBulk('${s.search_id}','xlsx')">↓ Excel</button>
             <button class="dl-btn" onclick="dlBulk('${s.search_id}','html')">↓ HTML</button>
           </div>
+          <div class="section-sel-bar">
+            <button class="sel-btn" onclick="toggleAllBulk(${sIdx},true)">Select all</button>
+            <button class="sel-btn" onclick="toggleAllBulk(${sIdx},false)">Select none</button>
+            <span class="sel-count" id="bulk-sel-count-${sIdx}"></span>
+            <button class="sel-export" onclick="exportSelected('bulk-${sIdx}','csv')">↓ CSV</button>
+            <button class="sel-export" onclick="exportSelected('bulk-${sIdx}','xlsx')">↓ Excel</button>
+            <button class="sel-export" onclick="exportSelected('bulk-${sIdx}','html')">↓ HTML</button>
+          </div>
           <div class="table-wrap" style="border-radius:0;border:none;border-top:1px solid var(--gray-100)">
             <table>
-              <thead><tr><th class="col-n">#</th><th class="col-thumb">Preview</th><th>Title</th><th class="col-src">Source</th><th class="col-eng">Engine</th></tr></thead>
-              <tbody>${tableRows}</tbody>
+              <thead><tr>
+                <th class="col-cb"><input type="checkbox" class="result-cb" checked onchange="toggleAllBulk(${sIdx},this.checked)" title="Select all"></th>
+                <th class="col-n">#</th><th class="col-thumb">Preview</th><th>Title</th><th class="col-src">Source</th><th class="col-eng">Engine</th>
+              </tr></thead>
+              <tbody id="bulk-tbody-${sIdx}"></tbody>
             </table>
           </div>
         </div>`;
       container.appendChild(section);
+
+      const tbody = document.getElementById(`bulk-tbody-${sIdx}`);
+      if (!s.results || !s.results.length) {
+        tbody.innerHTML = `<tr><td colspan="6"><div class="empty" style="padding:2rem"><p>No results found.</p></div></td></tr>`;
+      } else {
+        s.results.forEach((r, i) => {
+          const thumbCell = r.thumbnail
+            ? `<img class="thumb-img" src="${h(r.thumbnail)}" alt="" loading="lazy" onerror="this.style.display='none'">`
+            : `<div class="thumb-empty"></div>`;
+          const titleCell = r.url
+            ? `<a class="title-link" href="${h(r.url)}" target="_blank" rel="noopener">${h(r.title || r.url)}</a>`
+            : `<span style="color:var(--gray-400)">${h(r.title || '—')}</span>`;
+          const engineClass = r.engine && r.engine.includes('·') ? 'multi' : r.engine === 'Yandex' ? 'yandex' : r.engine === 'Bing' ? 'bing' : 'google';
+          const badge = r.engine ? `<span class="engine-badge ${engineClass}">${h(r.engine)}</span>` : '—';
+          const row = document.createElement('tr');
+          row.dataset.idx = i;
+          row.innerHTML = `
+            <td class="col-cb"><input type="checkbox" class="result-cb" checked onchange="updateBulkCount(${sIdx})"></td>
+            <td><span class="row-num">${i + 1}</span></td>
+            <td>${thumbCell}</td>
+            <td>${titleCell}</td>
+            <td><span class="source-text">${h(r.source || '—')}</span></td>
+            <td>${badge}</td>`;
+          tbody.appendChild(row);
+        });
+      }
+      updateBulkCount(sIdx);
     });
 
     document.getElementById('bulk-results').classList.add('show');
@@ -730,6 +803,11 @@
   }
 
   // ── Search ─────────────────────────────────────────────────────────────────
+  function getEngineChoice() {
+    const el = document.querySelector('input[name="engine-choice"]:checked');
+    return el ? el.value : 'all';
+  }
+
   async function doSearch() {
     if (activeTab === 'url' && !document.getElementById('url-input').value.trim()) {
       alert('Please enter an image URL.'); return;
@@ -743,6 +821,7 @@
 
     try {
       const fd = new FormData();
+      fd.append('engines', getEngineChoice());
       let resp, data;
       if (activeTab === 'url') {
         const urls = document.getElementById('url-input').value.trim().split(/\r?\n/).map(u => u.trim()).filter(Boolean);
@@ -752,13 +831,13 @@
           data = await resp.json();
           if (!resp.ok) { showError(data.detail || 'An unexpected error occurred.'); return; }
           searchId = data.search_id;
-          renderResults(data.results, data.count);
+          renderResults(data.results, data.count, data.engine_errors || {});
         } else {
           fd.append('urls', urls.join('\n'));
           resp = await fetch('/api/bulk-search', { method: 'POST', body: fd });
           data = await resp.json();
           if (!resp.ok) { showError(data.detail || 'An unexpected error occurred.'); return; }
-          renderBulkResults(data.results);
+          renderBulkResults(data.searches || data.results);
         }
       } else {
         fd.append('file', chosenFile);
@@ -766,7 +845,7 @@
         data = await resp.json();
         if (!resp.ok) { showError(data.detail || 'An unexpected error occurred.'); return; }
         searchId = data.search_id;
-        renderResults(data.results, data.count);
+        renderResults(data.results, data.count, data.engine_errors || {});
       }
     } catch {
       showError('Network error — please check your connection and try again.');
@@ -776,13 +855,25 @@
   }
 
   // ── Render results ─────────────────────────────────────────────────────────
-  function renderResults(results, count) {
+  function renderEngineErrors(errors, containerId) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    const failed = Object.keys(errors || {});
+    if (!failed.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+    el.style.display = '';
+    el.innerHTML = `<svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="flex-shrink:0;color:#d97706"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 15.75h.007v.008H12v-.008z"/></svg>
+    <span>Could not reach: <strong>${failed.join(', ')}</strong>. Results shown are from the engines that responded. This is usually a SerpAPI plan or credit issue.</span>`;
+  }
+
+  function renderResults(results, count, engineErrors) {
+    _singleResults = results;
     document.getElementById('result-num').textContent = count;
+    renderEngineErrors(engineErrors, 'engine-error-bar');
     const tbody = document.getElementById('results-tbody');
     tbody.innerHTML = '';
 
     if (!results.length) {
-      tbody.innerHTML = `<tr><td colspan="4"><div class="empty">
+      tbody.innerHTML = `<tr><td colspan="6"><div class="empty">
         <svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="#d1d5db" stroke-width="1.5">
           <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
         </svg>
@@ -802,17 +893,80 @@
         const engineClass = r.engine && r.engine.includes('·') ? 'multi' : r.engine === 'Yandex' ? 'yandex' : r.engine === 'Bing' ? 'bing' : 'google';
         const engineBadge = r.engine ? `<span class="engine-badge ${engineClass}">${h(r.engine)}</span>` : '—';
 
-        tbody.innerHTML += `<tr>
+        const row = document.createElement('tr');
+        row.dataset.idx = i;
+        row.innerHTML = `
+          <td class="col-cb"><input type="checkbox" class="result-cb" checked onchange="updateMainCount()"></td>
           <td><span class="row-num">${i + 1}</span></td>
           <td>${thumbCell}</td>
           <td>${titleCell}</td>
           <td><span class="source-text" title="${h(r.source)}">${h(r.source || '—')}</span></td>
-          <td>${engineBadge}</td>
-        </tr>`;
+          <td>${engineBadge}</td>`;
+        tbody.appendChild(row);
       });
     }
 
+    updateMainCount();
     document.getElementById('results').classList.add('show');
+  }
+
+  // ── Selection helpers ──────────────────────────────────────────────────────
+  function toggleAllMain(checked) {
+    document.querySelectorAll('#results-tbody .result-cb').forEach(cb => cb.checked = checked);
+    const hdr = document.getElementById('sel-all-main');
+    if (hdr) hdr.checked = checked;
+    updateMainCount();
+  }
+
+  function updateMainCount() {
+    const all  = document.querySelectorAll('#results-tbody .result-cb');
+    const on   = document.querySelectorAll('#results-tbody .result-cb:checked');
+    document.getElementById('main-sel-count').textContent = `${on.length} of ${all.length} selected`;
+    const hdr = document.getElementById('sel-all-main');
+    if (hdr) hdr.indeterminate = on.length > 0 && on.length < all.length;
+  }
+
+  function toggleAllBulk(sIdx, checked) {
+    document.querySelectorAll(`#bulk-tbody-${sIdx} .result-cb`).forEach(cb => cb.checked = checked);
+    updateBulkCount(sIdx);
+  }
+
+  function updateBulkCount(sIdx) {
+    const all = document.querySelectorAll(`#bulk-tbody-${sIdx} .result-cb`);
+    const on  = document.querySelectorAll(`#bulk-tbody-${sIdx} .result-cb:checked`);
+    const el  = document.getElementById(`bulk-sel-count-${sIdx}`);
+    if (el) el.textContent = `${on.length} of ${all.length} selected`;
+  }
+
+  async function exportSelected(scope, fmt) {
+    let results = [];
+    if (scope === 'main') {
+      document.querySelectorAll('#results-tbody tr[data-idx]').forEach(row => {
+        if (row.querySelector('.result-cb')?.checked)
+          results.push(_singleResults[parseInt(row.dataset.idx)]);
+      });
+    } else {
+      const sIdx = parseInt(scope.replace('bulk-', ''));
+      document.querySelectorAll(`#bulk-tbody-${sIdx} tr[data-idx]`).forEach(row => {
+        if (row.querySelector('.result-cb')?.checked)
+          results.push(_bulkSections[sIdx][parseInt(row.dataset.idx)]);
+      });
+    }
+    if (!results.length) { alert('Please tick at least one result first.'); return; }
+    try {
+      const resp = await fetch('/api/export-selection', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({results, fmt})
+      });
+      if (!resp.ok) { const d = await resp.json(); showError(d.detail || 'Export failed.'); return; }
+      const blob = await resp.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href = url; a.download = `selected.${fmt}`;
+      document.body.appendChild(a); a.click();
+      document.body.removeChild(a); URL.revokeObjectURL(url);
+    } catch { showError('Export failed — please try again.'); }
   }
 
   // ── Downloads ──────────────────────────────────────────────────────────────
@@ -844,6 +998,46 @@
   function h(s) {
     if (!s) return '';
     return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // ── Clear / reset ──────────────────────────────────────────────────────────
+  function clearResults() {
+    // Hide results panels and error
+    document.getElementById('results').classList.remove('show');
+    document.getElementById('bulk-results').classList.remove('show');
+    document.getElementById('error-box').classList.remove('show');
+
+    // Clear result data
+    _singleResults = [];
+    _bulkSections  = [];
+    searchId       = null;
+    bulkSearchIds  = [];
+    document.getElementById('results-tbody').innerHTML = '';
+    document.getElementById('bulk-sections').innerHTML = '';
+
+    // Clear URL textarea and single-file input
+    document.getElementById('url-input').value = '';
+    document.getElementById('file-input').value = '';
+    document.getElementById('bulk-input').value = '';
+    chosenFile = null;
+
+    // Hide single-file preview
+    const prev = document.getElementById('file-preview');
+    if (prev) prev.style.display = 'none';
+
+    // Reset bulk file state
+    bulkFiles = [];
+    document.getElementById('bulk-file-list').innerHTML = '';
+
+    // Reset search button label
+    const btn = document.getElementById('search-btn');
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = `<svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg> Search`;
+    }
+
+    // Scroll back to form
+    document.querySelector('.card').scrollIntoView({behavior: 'smooth', block: 'start'});
   }
 
 </script>
