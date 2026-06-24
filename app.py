@@ -404,7 +404,8 @@ async def stats_page():
     for r in data["rows"]:
         label    = r["source_label"] or "—"
         short    = label if len(label) <= 55 else label[:52] + "…"
-        ts       = r["created_at"][:16].replace("T", " ") + " UTC" if r["created_at"] else "—"
+        ca       = r["created_at"]
+        ts       = (ca.strftime("%Y-%m-%d %H:%M") + " UTC") if ca else "—"
         found    = r["total_results"] or 0
         selected = r["selected_count"] or 0
         pct      = round(selected / found * 100, 1) if found else 0
@@ -910,7 +911,7 @@ _HTML = """<!DOCTYPE html>
     #url-input::placeholder { color: rgba(255,255,255,.45); }
   .col-cb { width: 36px; text-align: center; }
   .result-cb { width: 16px; height: 16px; cursor: pointer; accent-color: var(--brand); }
-  .sel-bar { display: flex; align-items: center; gap: 10px; padding: 8px 16px; background: var(--gray-50); border-bottom: 1px solid var(--gray-100); flex-wrap: wrap; }
+  .sel-bar { display: flex; align-items: center; gap: 10px; padding: 8px 16px; background: var(--gray-50); border-bottom: 1px solid var(--gray-100); flex-wrap: wrap; position: sticky; top: 4rem; z-index: 50; box-shadow: 0 2px 6px rgba(0,0,0,.06); }
   .sel-bar .sel-count { font-size: .82rem; color: var(--gray-500); margin-right: auto; }
   .sel-bar .sel-btn { font-size: .78rem; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--gray-200); background: #fff; cursor: pointer; color: var(--gray-600); }
   .sel-bar .sel-btn:hover { background: var(--gray-50); border-color: var(--gray-300); }
@@ -1640,11 +1641,14 @@ _HTML = """<!DOCTYPE html>
         const data = await resp.json();
         if (!resp.ok || !data.results.length) break;
         _searchStart = page * _PAGE_SIZE;
+        const seen = new Set(_singleResults.map(r => r.url).filter(Boolean));
+        const fresh = data.results.filter(r => !r.url || !seen.has(r.url));
+        if (!fresh.length) break;
         const startIdx = _singleResults.length;
-        _singleResults = _singleResults.concat(data.results);
+        _singleResults = _singleResults.concat(fresh);
         document.getElementById('result-num').textContent = _singleResults.length;
         const tbody = document.getElementById('results-tbody');
-        data.results.forEach((r, i) => tbody.appendChild(makeResultRow(r, startIdx + i)));
+        fresh.forEach((r, i) => tbody.appendChild(makeResultRow(r, startIdx + i)));
         applyFilter();
         checkLoadMore(data.count);
       } catch { break; }
@@ -1665,11 +1669,13 @@ _HTML = """<!DOCTYPE html>
       const data = await resp.json();
       if (!resp.ok) { showError(data.detail || 'Failed to load more results.'); return; }
       _searchStart += _PAGE_SIZE;
+      const seen = new Set(_singleResults.map(r => r.url).filter(Boolean));
+      const fresh = data.results.filter(r => !r.url || !seen.has(r.url));
       const startIdx = _singleResults.length;
-      _singleResults = _singleResults.concat(data.results);
+      _singleResults = _singleResults.concat(fresh);
       document.getElementById('result-num').textContent = _singleResults.length;
       const tbody = document.getElementById('results-tbody');
-      data.results.forEach((r, i) => tbody.appendChild(makeResultRow(r, startIdx + i)));
+      fresh.forEach((r, i) => tbody.appendChild(makeResultRow(r, startIdx + i)));
       applyFilter();
       checkLoadMore(data.count);
     } catch {
