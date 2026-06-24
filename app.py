@@ -175,10 +175,10 @@ async def search(
 
         if results:
             prefix = str(work_dir / "results")
+            (work_dir / "results.json").write_text(json.dumps({"results": results, "source_label": source_label}))
 
             def _exports():
                 export_csv(results, f"{prefix}.csv")
-                export_excel(results, f"{prefix}.xlsx")
                 export_html(results, f"{prefix}.html", source_label)
 
             await loop.run_in_executor(_pool, _exports)
@@ -254,7 +254,19 @@ async def download_file(search_id: str, fmt: str):
     if "/" in search_id or "\\" in search_id or ".." in search_id:
         raise HTTPException(400, "Invalid ID")
 
-    fpath = TEMP_DIR / search_id / f"results.{fmt}"
+    work_dir = TEMP_DIR / search_id
+    fpath = work_dir / f"results.{fmt}"
+
+    if not fpath.exists() and fmt == "xlsx":
+        json_path = work_dir / "results.json"
+        if not json_path.exists():
+            raise HTTPException(404, "Results not found — please run a new search")
+        raw = json.loads(json_path.read_text())
+        results      = raw.get("results", raw) if isinstance(raw, dict) else raw
+        source_label = raw.get("source_label", "") if isinstance(raw, dict) else ""
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(_pool, export_excel, results, str(fpath))
+
     if not fpath.exists():
         raise HTTPException(404, "Results not found — please run a new search")
 
@@ -315,7 +327,6 @@ async def bulk_search(
                 prefix = str(work_dir / "results")
                 def _exports():
                     export_csv(results, f"{prefix}.csv")
-                    export_excel(results, f"{prefix}.xlsx")
                     export_html(results, f"{prefix}.html", source_label)
                 await loop.run_in_executor(_pool, _exports)
             (work_dir / "results.json").write_text(json.dumps(results))
@@ -1097,7 +1108,6 @@ _HTML = """<!DOCTYPE html>
   <div class="loading" id="loading">
     <img class="bird-loader" src="/static/magpie flying gif.gif" alt="Searching…">
     <p>Searching the web&hellip;</p>
-    <p class="hint">Fetching thumbnails for your Excel report &mdash; this may take up to a minute.</p>
   </div>
 
   <!-- Error -->
@@ -1169,7 +1179,7 @@ _HTML = """<!DOCTYPE html>
         </colgroup>
         <thead>
           <tr>
-            <th class="col-cb"><input type="checkbox" id="sel-all-main" class="result-cb" onchange="toggleAllMain(this.checked)" checked title="Select all"></th>
+            <th class="col-cb"><input type="checkbox" id="sel-all-main" class="result-cb" onchange="toggleAllMain(this.checked)" title="Select all"></th>
             <th class="col-n">#</th>
             <th class="col-thumb">Preview</th>
             <th>Title</th>
@@ -1448,7 +1458,7 @@ _HTML = """<!DOCTYPE html>
           <div class="table-wrap" style="border-radius:0;border:none;border-top:1px solid var(--gray-100)">
             <table>
               <thead><tr>
-                <th class="col-cb"><input type="checkbox" class="result-cb" checked onchange="toggleAllBulk(${sIdx},this.checked)" title="Select all"></th>
+                <th class="col-cb"><input type="checkbox" class="result-cb" onchange="toggleAllBulk(${sIdx},this.checked)" title="Select all"></th>
                 <th class="col-n">#</th><th class="col-thumb">Preview</th><th>Title</th><th class="col-src">Source</th><th class="col-eng">Engine</th>
               </tr></thead>
               <tbody id="bulk-tbody-${sIdx}"></tbody>
@@ -1473,7 +1483,7 @@ _HTML = """<!DOCTYPE html>
           const row = document.createElement('tr');
           row.dataset.idx = i;
           row.innerHTML = `
-            <td class="col-cb"><input type="checkbox" class="result-cb" checked onchange="updateBulkCount(${sIdx})"></td>
+            <td class="col-cb"><input type="checkbox" class="result-cb" onchange="updateBulkCount(${sIdx})"></td>
             <td><span class="row-num">${i + 1}</span></td>
             <td>${thumbCell}</td>
             <td>${titleCell}</td>
@@ -1583,7 +1593,7 @@ _HTML = """<!DOCTYPE html>
     const row = document.createElement('tr');
     row.dataset.idx = idx;
     row.innerHTML = `
-      <td class="col-cb"><input type="checkbox" class="result-cb" checked onchange="updateMainCount()"></td>
+      <td class="col-cb"><input type="checkbox" class="result-cb" onchange="updateMainCount()"></td>
       <td><span class="row-num">${idx + 1}</span></td>
       <td>${thumbCell}</td>
       <td>${titleCell}</td>
