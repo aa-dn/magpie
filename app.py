@@ -410,9 +410,17 @@ async def stats_page():
         selected = r["selected_count"] or 0
         pct      = round(selected / found * 100, 1) if found else 0
         pct_html = f'<span class="pct-bar"><span class="pct-fill" style="width:{min(pct,100)}%"></span></span>{pct}%'
+        is_url   = (r.get("source_type") == "url") and label.startswith("http")
+        thumb    = (
+            f'<img src="{label}" alt="" '
+            f'style="width:48px;height:36px;object-fit:cover;border-radius:.375rem;display:block;background:#e5e7eb;" '
+            f'onerror="this.replaceWith(Object.assign(document.createElement(\'div\'),{{className:\'file-placeholder\',title:\'{label}\'}}))">'
+            if is_url else
+            f'<div class="file-placeholder" title="{label}"></div>'
+        )
         rows_html += f"""<tr>
+            <td class="thumb-col">{thumb}</td>
             <td title="{label}">{short}</td>
-            <td>{r["source_type"] or "—"}</td>
             <td>{r["engines_used"] or "—"}</td>
             <td>{ts}</td>
             <td class="num">{found}</td>
@@ -458,6 +466,12 @@ async def stats_page():
   .pct-fill {{ position: absolute; left: 0; top: 0; height: 100%;
                background: linear-gradient(90deg, #7c3aed, #a855f7);
                border-radius: 999px; }}
+  .thumb-col {{ width: 56px; padding: .4rem .75rem; }}
+  .file-placeholder {{ width: 48px; height: 36px; border-radius: .375rem;
+                       background: #e5e7eb; display: flex; align-items: center;
+                       justify-content: center; font-size: .6rem; color: #9ca3af;
+                       font-weight: 600; letter-spacing: .03em; }}
+  .file-placeholder::after {{ content: 'FILE'; }}
   .overflow-wrap {{ overflow-x: auto; }}
 </style>
 </head>
@@ -471,7 +485,7 @@ async def stats_page():
 <div class="overflow-wrap">
 <table>
   <thead><tr>
-    <th>Source image</th><th>Type</th><th>Engines</th><th>Uploaded</th>
+    <th></th><th>Source image</th><th>Engines</th><th>Uploaded</th>
     <th class="num">Results found</th><th class="num">Selected</th><th class="num">% selected</th>
   </tr></thead>
   <tbody>{rows_html or '<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:2rem">No searches yet.</td></tr>'}</tbody>
