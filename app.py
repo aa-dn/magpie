@@ -61,7 +61,11 @@ FONT_URL  = "https://fonts.googleapis.com/css2?family=Tirra:wght@400;500;600;700
 SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
 TEMP_DIR = Path(tempfile.gettempdir()) / "ris_cache"
 TEMP_DIR.mkdir(exist_ok=True)
-init_db()
+
+try:
+    init_db()
+except Exception as _db_err:
+    print(f"WARNING: DB init failed ({_db_err}) — stats will be unavailable")
 
 _pool = ThreadPoolExecutor(max_workers=4)
 app = FastAPI(title="Image Intelligence")
@@ -180,7 +184,10 @@ async def search(
             await loop.run_in_executor(_pool, _exports)
 
         source_type = "file" if (file and file.filename) else "url"
-        record_upload(search_id, source_label, source_type, only, len(results))
+        try:
+            record_upload(search_id, source_label, source_type, only, len(results))
+        except Exception:
+            pass
 
         return {"search_id": search_id, "count": len(results), "results": results, "engine_errors": engine_errors, "search_url": search_url}
 
@@ -313,7 +320,10 @@ async def bulk_search(
                 await loop.run_in_executor(_pool, _exports)
             (work_dir / "results.json").write_text(json.dumps(results))
             src_type = "url" if source_label.startswith("http") else "file"
-            record_upload(search_id, source_label, src_type, only, len(results))
+            try:
+                record_upload(search_id, source_label, src_type, only, len(results))
+            except Exception:
+                pass
             return {"search_id": search_id, "source_label": source_label, "count": len(results), "results": results, "engine_errors": engine_errors}
         except Exception as e:
             return {"search_id": search_id, "source_label": source_label, "count": 0, "results": [], "error": str(e)}
