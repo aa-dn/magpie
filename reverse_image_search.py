@@ -30,6 +30,21 @@ def _call_engine(params: dict) -> dict:
 
 
 def _parse_engine_results(data: dict, engine_label: str) -> list[dict]:
+    # Bing reverse image returns results across two keys; use `source` as the page URL
+    if "pages_with_this_image" in data or "related_content" in data:
+        items = list(data.get("pages_with_this_image", [])) + list(data.get("related_content", []))
+        results = []
+        for item in items:
+            thumb = item.get("thumbnail", "")
+            results.append({
+                "title":     item.get("title", ""),
+                "url":       item.get("source") or item.get("link", ""),
+                "source":    item.get("domain") or item.get("source", ""),
+                "thumbnail": thumb if isinstance(thumb, str) else "",
+                "engine":    engine_label,
+            })
+        return results
+
     items = (
         data.get("visual_matches") or
         data.get("image_results") or
@@ -40,7 +55,7 @@ def _parse_engine_results(data: dict, engine_label: str) -> list[dict]:
     for item in items:
         thumb = item.get("thumbnail", "")
         if isinstance(thumb, dict):
-            thumb = thumb.get("src", "")
+            thumb = thumb.get("src", "") or thumb.get("link", "")
         results.append({
             "title":     item.get("title", ""),
             "url":       item.get("link") or item.get("url", ""),
@@ -56,9 +71,9 @@ def search_reverse_image(image_url: str, api_key: str) -> dict:
 
 
 _ENGINE_CONFIGS = {
-    "google": ({"engine": "google_lens"}, "url", "Google Lens"),
-    "yandex": ({"engine": "yandex_reverse_image_search"}, "image_url", "Yandex"),
-    "bing":   ({"engine": "bing_visual_search"}, "image_url", "Bing"),
+    "google": ({"engine": "google_lens"},        "url",       "Google Lens"),
+    "yandex": ({"engine": "yandex_images"},      "url",       "Yandex"),
+    "bing":   ({"engine": "bing_reverse_image"}, "image_url", "Bing"),
 }
 
 
@@ -115,7 +130,7 @@ def export_csv(results: list[dict], path: str) -> None:
         writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(results)
-    print(f"  CSV   → {path}")
+    print(f"  CSV   -> {path}")
 
 
 def _fetch_image_bytes(url: str) -> BytesIO | None:
@@ -134,7 +149,7 @@ def export_excel(results: list[dict], path: str) -> None:
         from openpyxl.drawing.image import Image as XLImage
         from openpyxl.styles import Font, Alignment, PatternFill
     except ImportError:
-        print("  Excel → skipped (run: pip install openpyxl)")
+        print("  Excel -> skipped (run: pip install openpyxl)")
         return
 
     wb = openpyxl.Workbook()
@@ -196,7 +211,7 @@ def export_excel(results: list[dict], path: str) -> None:
                 ws.cell(row=row, column=2, value=thumb_url)
 
     wb.save(path)
-    print(f"  Excel → {path}")
+    print(f"  Excel -> {path}")
 
 
 def export_html(results: list[dict], path: str, source_image_url: str) -> None:
@@ -281,7 +296,7 @@ def export_html(results: list[dict], path: str, source_image_url: str) -> None:
 
     with open(path, "w", encoding="utf-8") as f:
         f.write(html)
-    print(f"  HTML  → {path}")
+    print(f"  HTML  -> {path}")
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -310,7 +325,7 @@ def main() -> None:
     parser.add_argument(
         "--output",
         default="results",
-        help="Output filename prefix (default: results → results.csv / .xlsx / .html)",
+        help="Output filename prefix (default: results -> results.csv / .xlsx / .html)",
     )
     parser.add_argument("--no-excel", action="store_true", help="Skip Excel output")
     parser.add_argument("--no-html",  action="store_true", help="Skip HTML output")
@@ -346,7 +361,7 @@ def main() -> None:
         raw_path = f"{args.output}_raw.json"
         with open(raw_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-        print(f"  Raw   → {raw_path}")
+        print(f"  Raw   -> {raw_path}")
 
     results = parse_results(data)
 

@@ -27,6 +27,7 @@ from reverse_image_search import (
     export_html,
     search_all_engines,
 )
+from database import init_db, record_upload, record_selections, get_stats
 
 # ══════════════════════════════════════════════════════════════════════════════
 # BRANDING — edit these values to customise the tool's appearance
@@ -60,6 +61,7 @@ FONT_URL  = "https://fonts.googleapis.com/css2?family=Tirra:wght@400;500;600;700
 SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
 TEMP_DIR = Path(tempfile.gettempdir()) / "ris_cache"
 TEMP_DIR.mkdir(exist_ok=True)
+init_db()
 
 _pool = ThreadPoolExecutor(max_workers=4)
 app = FastAPI(title="Image Intelligence")
@@ -162,7 +164,7 @@ async def search(
         else:
             raise HTTPException(400, "Provide an image URL or upload a file")
 
-        only = engines if engines in {"all", "google", "bing", "yandex"} else "all"
+        only = engines if engines in {"all", "google", "yandex", "bing"} else "all"
         results, engine_errors = await loop.run_in_executor(
             _pool, functools.partial(search_all_engines, search_url, SERPAPI_KEY, only)
         )
@@ -176,6 +178,9 @@ async def search(
                 export_html(results, f"{prefix}.html", source_label)
 
             await loop.run_in_executor(_pool, _exports)
+
+        source_type = "file" if (file and file.filename) else "url"
+        record_upload(search_id, source_label, source_type, only, len(results))
 
         return {"search_id": search_id, "count": len(results), "results": results, "engine_errors": engine_errors, "search_url": search_url}
 
@@ -289,7 +294,7 @@ async def bulk_search(
     if not targets:
         raise HTTPException(400, "Provide at least one image or URL")
 
-    only = engines if engines in {"all", "google", "bing", "yandex"} else "all"
+    only = engines if engines in {"all", "google", "yandex", "bing"} else "all"
     loop = asyncio.get_event_loop()
 
     async def _search_one(search_id, work_dir, search_url, source_label):
@@ -307,6 +312,8 @@ async def bulk_search(
                     export_html(results, f"{prefix}.html", source_label)
                 await loop.run_in_executor(_pool, _exports)
             (work_dir / "results.json").write_text(json.dumps(results))
+            src_type = "url" if source_label.startswith("http") else "file"
+            record_upload(search_id, source_label, src_type, only, len(results))
             return {"search_id": search_id, "source_label": source_label, "count": len(results), "results": results, "engine_errors": engine_errors}
         except Exception as e:
             return {"search_id": search_id, "source_label": source_label, "count": 0, "results": [], "error": str(e)}
@@ -349,6 +356,86 @@ async def download_combined(fmt: str, ids: str):
         export_html(all_results, f"{prefix}.html", "Combined bulk search")
 
     return FileResponse(f"{prefix}.{fmt}", media_type=media[fmt], filename=f"combined_results.{fmt}")
+
+
+@app.post("/api/record-selections")
+async def api_record_selections(request: Request):
+    payload = await request.json()
+    upload_id = payload.get("upload_id", "")
+    results   = payload.get("results", [])
+    action    = payload.get("action", "export")
+    if upload_id and results:
+        record_selections(upload_id, results, action)
+    return {"ok": True}
+
+
+@app.get("/stats", response_class=HTMLResponse)
+async def stats_page():
+    data = get_stats()
+    rows_html = ""
+    for r in data["rows"]:
+        label = r["source_label"] or "—"
+        short = label if len(label) <= 55 else label[:52] + "…"
+        ts    = r["created_at"][:16].replace("T", " ") + " UTC" if r["created_at"] else "—"
+        rows_html += f"""<tr>
+            <td title="{label}">{short}</td>
+            <td>{r["source_type"] or "—"}</td>
+            <td>{r["engines_used"] or "—"}</td>
+            <td>{ts}</td>
+            <td class="num">{r["total_results"]}</td>
+            <td class="num hl">{r["selected_count"]}</td>
+        </tr>\n"""
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Magpie — Stats</title>
+<style>
+  *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          background: #f9fafb; color: #111827; padding: 2rem 1.5rem; }}
+  h1 {{ font-size: 1.4rem; font-weight: 700; margin-bottom: 1.5rem; }}
+  h1 a {{ color: #6d28d9; text-decoration: none; font-size: .85rem; font-weight: 500;
+           margin-left: .75rem; }}
+  .cards {{ display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 2rem; }}
+  .card {{ background: #fff; border: 1px solid #e5e7eb; border-radius: .75rem;
+            padding: 1.25rem 1.75rem; min-width: 180px; box-shadow: 0 1px 3px rgba(0,0,0,.05); }}
+  .card .label {{ font-size: .78rem; font-weight: 600; text-transform: uppercase;
+                  letter-spacing: .05em; color: #6b7280; margin-bottom: .25rem; }}
+  .card .value {{ font-size: 2.2rem; font-weight: 700; color: #6d28d9; line-height: 1; }}
+  table {{ width: 100%; border-collapse: collapse; background: #fff;
+           border: 1px solid #e5e7eb; border-radius: .75rem; overflow: hidden;
+           box-shadow: 0 1px 3px rgba(0,0,0,.05); font-size: .875rem; }}
+  thead tr {{ background: #f3f4f6; }}
+  th {{ text-align: left; padding: .6rem 1rem; font-size: .72rem; font-weight: 600;
+        text-transform: uppercase; letter-spacing: .05em; color: #6b7280; }}
+  td {{ padding: .7rem 1rem; border-top: 1px solid #f3f4f6; color: #374151;
+        max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+  tr:hover td {{ background: #fafafa; }}
+  .num {{ text-align: right; font-variant-numeric: tabular-nums; }}
+  .hl  {{ font-weight: 700; color: #6d28d9; }}
+  .overflow-wrap {{ overflow-x: auto; }}
+</style>
+</head>
+<body>
+<h1>Magpie — Usage Stats <a href="/">← back to app</a></h1>
+<div class="cards">
+  <div class="card"><div class="label">Images uploaded</div><div class="value">{data["total_uploads"]}</div></div>
+  <div class="card"><div class="label">Results selected</div><div class="value">{data["total_selected"]}</div></div>
+</div>
+<div class="overflow-wrap">
+<table>
+  <thead><tr>
+    <th>Source image</th><th>Type</th><th>Engines</th><th>Uploaded</th>
+    <th class="num">Results found</th><th class="num">Selected</th>
+  </tr></thead>
+  <tbody>{rows_html or '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:2rem">No searches yet.</td></tr>'}</tbody>
+</table>
+</div>
+</body>
+</html>"""
 
 
 # ── HTML ──────────────────────────────────────────────────────────────────────
@@ -952,6 +1039,13 @@ _HTML = """<!DOCTYPE html>
     </div>
 
     <div class="search-footer">
+      <div class="engine-picker">
+        <label>Engines:</label>
+        <label class="engine-pill"><input type="radio" name="engine-choice" value="all" checked onchange="updateCreditNote()"><span>All three</span></label>
+        <label class="engine-pill"><input type="radio" name="engine-choice" value="google" onchange="updateCreditNote()"><span>Google</span></label>
+        <label class="engine-pill"><input type="radio" name="engine-choice" value="yandex" onchange="updateCreditNote()"><span>Yandex</span></label>
+        <label class="engine-pill"><input type="radio" name="engine-choice" value="bing" onchange="updateCreditNote()"><span>Bing</span></label>
+      </div>
       <div class="count-picker">
         <span class="count-picker-label">Results per search:</span>
         <label class="count-pill"><input type="radio" name="result-pages" value="1" checked onchange="updateCreditNote()"><span>59 · <em>1 credit</em></span></label>
@@ -964,7 +1058,7 @@ _HTML = """<!DOCTYPE html>
         </svg>
         Search
       </button>
-      <p class="credit-note" id="credit-note">Uses 1 SerpAPI credit per search</p>
+      <p class="credit-note" id="credit-note">Uses 3 SerpAPI credits per search (1 per engine)</p>
     </div>
   </div>
 
@@ -1578,19 +1672,26 @@ _HTML = """<!DOCTYPE html>
 
   async function exportSelected(scope, fmt) {
     let results = [];
+    let uploadId = null;
     if (scope === 'main') {
+      uploadId = searchId;
       document.querySelectorAll('#results-tbody tr[data-idx]:not(.filtered-out)').forEach(row => {
         if (row.querySelector('.result-cb')?.checked)
           results.push(_singleResults[parseInt(row.dataset.idx)]);
       });
     } else {
       const sIdx = parseInt(scope.replace('bulk-', ''));
+      uploadId = bulkSearchIds[sIdx] || null;
       document.querySelectorAll(`#bulk-tbody-${sIdx} tr[data-idx]`).forEach(row => {
         if (row.querySelector('.result-cb')?.checked)
           results.push(_bulkSections[sIdx][parseInt(row.dataset.idx)]);
       });
     }
     if (!results.length) { alert('Please tick at least one result first.'); return; }
+    if (uploadId) fetch('/api/record-selections', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({upload_id: uploadId, results, action: 'export'})
+    }).catch(() => {});
     try {
       const resp = await fetch('/api/export-selection', {
         method: 'POST',
@@ -1678,8 +1779,11 @@ _HTML = """<!DOCTYPE html>
 
   function updateCreditNote() {
     _maxPages = getMaxPages();
+    const engine = getEngineChoice();
+    const engineCount = engine === 'all' ? 3 : 1;
+    const credits = _maxPages * engineCount;
     const el = document.getElementById('credit-note');
-    if (el) el.textContent = `Uses ${_maxPages} SerpAPI credit${_maxPages > 1 ? 's' : ''} per search`;
+    if (el) el.textContent = `Uses ${credits} SerpAPI credit${credits !== 1 ? 's' : ''} per search`;
   }
 
   // ── Social media filter ────────────────────────────────────────────────────
@@ -1723,8 +1827,9 @@ _HTML = """<!DOCTYPE html>
   }
 
   function saveToBirdhouse(scope) {
-    let results = [], sourceImage = '';
+    let results = [], sourceImage = '', uploadId = null;
     if (scope === 'main') {
+      uploadId = searchId;
       document.querySelectorAll('#results-tbody tr[data-idx]:not(.filtered-out)').forEach(row => {
         if (row.querySelector('.result-cb')?.checked)
           results.push(Object.assign({}, _singleResults[parseInt(row.dataset.idx)]));
@@ -1732,6 +1837,7 @@ _HTML = """<!DOCTYPE html>
       sourceImage = _searchUrl || '';
     } else {
       const sIdx = parseInt(scope.replace('bulk-', ''));
+      uploadId = bulkSearchIds[sIdx] || null;
       document.querySelectorAll(`#bulk-tbody-${sIdx} tr[data-idx]`).forEach(row => {
         if (row.querySelector('.result-cb')?.checked)
           results.push(Object.assign({}, (_bulkSections[sIdx] || [])[parseInt(row.dataset.idx)]));
@@ -1752,6 +1858,10 @@ _HTML = """<!DOCTYPE html>
     fresh.forEach(r => { r.source_image = sourceImage; r.birdhouse_saved = savedAt; });
     _birdhouse.push({ source_image: sourceImage, saved_at: savedAt, results: fresh });
     _bhSave();
+    if (uploadId) fetch('/api/record-selections', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({upload_id: uploadId, results: fresh, action: 'birdhouse'})
+    }).catch(() => {});
     renderBirdhouse();
     if (dupes.length) {
       showBhToast(`${fresh.length} saved — ⚠️ ${dupes.length} duplicate${dupes.length !== 1 ? 's' : ''} skipped`);
