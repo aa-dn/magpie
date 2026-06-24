@@ -382,18 +382,30 @@ async def api_record_selections(request: Request):
 @app.get("/stats", response_class=HTMLResponse)
 async def stats_page():
     data = get_stats()
+
+    total_results_found = sum(r["total_results"] or 0 for r in data["rows"])
+    total_pct = (
+        round(data["total_selected"] / total_results_found * 100, 1)
+        if total_results_found else 0
+    )
+
     rows_html = ""
     for r in data["rows"]:
-        label = r["source_label"] or "—"
-        short = label if len(label) <= 55 else label[:52] + "…"
-        ts    = r["created_at"][:16].replace("T", " ") + " UTC" if r["created_at"] else "—"
+        label    = r["source_label"] or "—"
+        short    = label if len(label) <= 55 else label[:52] + "…"
+        ts       = r["created_at"][:16].replace("T", " ") + " UTC" if r["created_at"] else "—"
+        found    = r["total_results"] or 0
+        selected = r["selected_count"] or 0
+        pct      = round(selected / found * 100, 1) if found else 0
+        pct_html = f'<span class="pct-bar"><span class="pct-fill" style="width:{min(pct,100)}%"></span></span>{pct}%'
         rows_html += f"""<tr>
             <td title="{label}">{short}</td>
             <td>{r["source_type"] or "—"}</td>
             <td>{r["engines_used"] or "—"}</td>
             <td>{ts}</td>
-            <td class="num">{r["total_results"]}</td>
-            <td class="num hl">{r["selected_count"]}</td>
+            <td class="num">{found}</td>
+            <td class="num hl">{selected}</td>
+            <td class="num pct-cell">{pct_html}</td>
         </tr>\n"""
 
     return f"""<!DOCTYPE html>
@@ -415,6 +427,7 @@ async def stats_page():
   .card .label {{ font-size: .78rem; font-weight: 600; text-transform: uppercase;
                   letter-spacing: .05em; color: #6b7280; margin-bottom: .25rem; }}
   .card .value {{ font-size: 2.2rem; font-weight: 700; color: #6d28d9; line-height: 1; }}
+  .card .sub {{ font-size: .75rem; color: #9ca3af; margin-top: .2rem; }}
   table {{ width: 100%; border-collapse: collapse; background: #fff;
            border: 1px solid #e5e7eb; border-radius: .75rem; overflow: hidden;
            box-shadow: 0 1px 3px rgba(0,0,0,.05); font-size: .875rem; }}
@@ -426,6 +439,13 @@ async def stats_page():
   tr:hover td {{ background: #fafafa; }}
   .num {{ text-align: right; font-variant-numeric: tabular-nums; }}
   .hl  {{ font-weight: 700; color: #6d28d9; }}
+  .pct-cell {{ min-width: 110px; }}
+  .pct-bar {{ display: inline-block; width: 48px; height: 7px; background: #e5e7eb;
+              border-radius: 999px; margin-right: 6px; vertical-align: middle;
+              position: relative; overflow: hidden; }}
+  .pct-fill {{ position: absolute; left: 0; top: 0; height: 100%;
+               background: linear-gradient(90deg, #7c3aed, #a855f7);
+               border-radius: 999px; }}
   .overflow-wrap {{ overflow-x: auto; }}
 </style>
 </head>
@@ -433,15 +453,16 @@ async def stats_page():
 <h1>Magpie — Usage Stats <a href="/">← back to app</a></h1>
 <div class="cards">
   <div class="card"><div class="label">Images uploaded</div><div class="value">{data["total_uploads"]}</div></div>
-  <div class="card"><div class="label">Results selected</div><div class="value">{data["total_selected"]}</div></div>
+  <div class="card"><div class="label">Results selected</div><div class="value">{data["total_selected"]}</div><div class="sub">of {total_results_found} total found</div></div>
+  <div class="card"><div class="label">Selection rate</div><div class="value">{total_pct}%</div><div class="sub">results kept on average</div></div>
 </div>
 <div class="overflow-wrap">
 <table>
   <thead><tr>
     <th>Source image</th><th>Type</th><th>Engines</th><th>Uploaded</th>
-    <th class="num">Results found</th><th class="num">Selected</th>
+    <th class="num">Results found</th><th class="num">Selected</th><th class="num">% selected</th>
   </tr></thead>
-  <tbody>{rows_html or '<tr><td colspan="6" style="text-align:center;color:#9ca3af;padding:2rem">No searches yet.</td></tr>'}</tbody>
+  <tbody>{rows_html or '<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:2rem">No searches yet.</td></tr>'}</tbody>
 </table>
 </div>
 </body>
@@ -1058,9 +1079,9 @@ _HTML = """<!DOCTYPE html>
       </div>
       <div class="count-picker">
         <span class="count-picker-label">Results per search:</span>
-        <label class="count-pill"><input type="radio" name="result-pages" value="1" checked onchange="updateCreditNote()"><span>59 · <em>1 credit</em></span></label>
-        <label class="count-pill"><input type="radio" name="result-pages" value="2" onchange="updateCreditNote()"><span>~120 · <em>2 credits</em></span></label>
-        <label class="count-pill"><input type="radio" name="result-pages" value="3" onchange="updateCreditNote()"><span>~180 · <em>3 credits</em></span></label>
+        <label class="count-pill"><input type="radio" name="result-pages" value="1" checked onchange="updateCreditNote()"><span>59 · <em id="pill-credits-1">3 credits</em></span></label>
+        <label class="count-pill"><input type="radio" name="result-pages" value="2" onchange="updateCreditNote()"><span>~120 · <em id="pill-credits-2">6 credits</em></span></label>
+        <label class="count-pill"><input type="radio" name="result-pages" value="3" onchange="updateCreditNote()"><span>~180 · <em id="pill-credits-3">9 credits</em></span></label>
       </div>
       <button class="search-btn" id="search-btn" onclick="doSearch()">
         <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
@@ -1794,7 +1815,14 @@ _HTML = """<!DOCTYPE html>
     const credits = _maxPages * engineCount;
     const el = document.getElementById('credit-note');
     if (el) el.textContent = `Uses ${credits} SerpAPI credit${credits !== 1 ? 's' : ''} per search`;
+    [1, 2, 3].forEach(pages => {
+      const pill = document.getElementById(`pill-credits-${pages}`);
+      if (!pill) return;
+      const n = pages * engineCount;
+      pill.textContent = `${n} credit${n !== 1 ? 's' : ''}`;
+    });
   }
+  updateCreditNote();
 
   // ── Social media filter ────────────────────────────────────────────────────
   function isSocial(r) {
