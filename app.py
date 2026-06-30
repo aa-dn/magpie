@@ -804,6 +804,8 @@ _HTML = """<!DOCTYPE html>
     }
     .filter-toggle:hover { border-color: var(--gray-300); background: var(--gray-50); }
     .filter-toggle.active { border-color: var(--brand); background: var(--brand-50); color: var(--brand); font-weight: 600; }
+    .eng-filter-bar { display: none; align-items: center; gap: 6px; padding: 8px 16px; border-bottom: 1px solid var(--gray-100); background: #fff; flex-wrap: wrap; }
+    .eng-filter-bar > span { font-size: .75rem; color: var(--gray-500); font-weight: 600; letter-spacing: .02em; margin-right: 2px; }
     #credit-widget {
       position: fixed; bottom: 16px; left: 16px; z-index: 200;
       display: flex; align-items: center; gap: 6px;
@@ -1220,6 +1222,13 @@ _HTML = """<!DOCTYPE html>
     </div>
 
     <div class="engine-error-bar" id="engine-error-bar"></div>
+    <div class="eng-filter-bar" id="eng-filter-bar">
+      <span>Filter by engine:</span>
+      <button class="filter-toggle active" data-engine="all" onclick="setEngineFilter('all')">All</button>
+      <button class="filter-toggle" data-engine="Google Lens" onclick="setEngineFilter('Google Lens')">Google Lens</button>
+      <button class="filter-toggle" data-engine="Bing" onclick="setEngineFilter('Bing')">Bing</button>
+      <button class="filter-toggle" data-engine="Yandex" onclick="setEngineFilter('Yandex')">Yandex</button>
+    </div>
     <div class="sel-bar" id="main-sel-bar">
       <button class="sel-btn" onclick="toggleAllMain(true)">Select all</button>
       <button class="sel-btn" onclick="toggleAllMain(false)">Select none</button>
@@ -1357,6 +1366,7 @@ _HTML = """<!DOCTYPE html>
   const _PAGE_SIZE = 59;
   let _maxPages = 1;
   let _socialFilter = false;
+  let _engineFilter = 'all';
   const _SOCIAL_DOMAINS = [
     'instagram','facebook','twitter','x.com','tiktok','reddit','youtube',
     'linkedin','pinterest','tumblr','snapchat','vk.com','weibo','flickr',
@@ -1698,6 +1708,7 @@ _HTML = """<!DOCTYPE html>
     applyFilter();
     checkLoadMore(count);
     document.getElementById('results').classList.add('show');
+    document.getElementById('eng-filter-bar').style.display = 'flex';
   }
 
   async function autoFetchPages(searchUrl, totalPages) {
@@ -1921,7 +1932,9 @@ _HTML = """<!DOCTYPE html>
   function applyFilter() {
     document.querySelectorAll('#results-tbody tr[data-idx]').forEach(row => {
       const r = _singleResults[parseInt(row.dataset.idx)];
-      row.classList.toggle('filtered-out', _socialFilter && !!r && !isSocial(r));
+      const socialOk = !_socialFilter || (!!r && isSocial(r));
+      const engineOk = _engineFilter === 'all' || (!!r && r.engine && r.engine.includes(_engineFilter));
+      row.classList.toggle('filtered-out', !socialOk || !engineOk);
     });
     updateMainCount();
   }
@@ -1929,6 +1942,13 @@ _HTML = """<!DOCTYPE html>
   function toggleSocialFilter() {
     _socialFilter = !_socialFilter;
     document.getElementById('social-filter-btn').classList.toggle('active', _socialFilter);
+    applyFilter();
+  }
+
+  function setEngineFilter(engine) {
+    _engineFilter = engine;
+    document.querySelectorAll('#eng-filter-bar .filter-toggle').forEach(b =>
+      b.classList.toggle('active', b.dataset.engine === engine));
     applyFilter();
   }
 
@@ -2094,9 +2114,13 @@ _HTML = """<!DOCTYPE html>
     _searchUrl     = null;
     _searchStart   = 0;
     _socialFilter  = false;
+    _engineFilter  = 'all';
     _maxPages      = getMaxPages();
     const sfb = document.getElementById('social-filter-btn');
     if (sfb) sfb.classList.remove('active');
+    document.querySelectorAll('#eng-filter-bar .filter-toggle').forEach(b =>
+      b.classList.toggle('active', b.dataset.engine === 'all'));
+    document.getElementById('eng-filter-bar').style.display = 'none';
     const lmw = document.getElementById('load-more-wrap');
     if (lmw) lmw.style.display = 'none';
     document.getElementById('results-tbody').innerHTML = '';

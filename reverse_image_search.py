@@ -93,6 +93,14 @@ _ENGINE_CONFIGS = {
 }
 
 
+def _canon_url(url: str) -> str:
+    """Canonical key for deduplication — normalises http/https and trailing slash differences."""
+    u = url.strip().rstrip('/')
+    if u.startswith('http://'):
+        u = 'https://' + u[7:]
+    return u.lower()
+
+
 def search_all_engines(image_url: str, api_key: str, engines: list = None, start: int = 0) -> tuple[list[dict], dict[str, str]]:
     """Returns (results, engine_errors). engines: list of 'google'/'bing'/'yandex', or None/\"all\" for all."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -129,12 +137,14 @@ def search_all_engines(image_url: str, api_key: str, engines: list = None, start
                 for r in _parse_engine_results(data, label):
                     if not r["url"]:
                         continue
-                    if r["url"] in by_url:
-                        existing = by_url[r["url"]]
-                        if label not in existing["engine"]:
+                    key = _canon_url(r["url"])
+                    if key in by_url:
+                        existing = by_url[key]
+                        existing_labels = [e.strip() for e in existing["engine"].split("·")]
+                        if label not in existing_labels:
                             existing["engine"] += f" · {label}"
                     else:
-                        by_url[r["url"]] = r
+                        by_url[key] = r
 
     return list(by_url.values()), engine_errors
 

@@ -6,15 +6,18 @@ No command line needed.
 """
 
 import os
+import sys
 import json
 import threading
 import traceback
+import webbrowser
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 from pathlib import Path
 
 from reverse_image_search import (
     search_reverse_image,
+    search_all_engines,
     upload_and_search,
     parse_results,
     export_csv,
@@ -22,23 +25,30 @@ from reverse_image_search import (
     export_html,
 )
 
-CONFIG_FILE = Path(__file__).parent / "config.json"
+_BASE_DIR = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
+CONFIG_FILE = _BASE_DIR / "config.json"
 
 
 def load_config() -> dict:
     if CONFIG_FILE.exists():
         try:
             return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+        except Exception as e:
+            messagebox.showwarning(
+                "Config load failed",
+                f"[RIS-001] Could not read saved settings — starting with defaults.\n\n{e}",
+            )
     return {}
 
 
 def save_config(data: dict) -> None:
     try:
         CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    except Exception:
-        pass
+    except Exception as e:
+        messagebox.showwarning(
+            "Settings not saved",
+            f"[RIS-002] Could not save settings — they will be lost when you close the app.\n\n{e}",
+        )
 
 
 class App(tk.Tk):
@@ -129,6 +139,10 @@ class App(tk.Tk):
             btn_row, text="Open results folder", command=self._open_outdir, state="disabled"
         )
         self._open_btn.pack(side="left", padx=(12, 0))
+        ttk.Button(
+            btn_row, text="Analytics",
+            command=lambda: webbrowser.open("https://magpie-zz2y.onrender.com/stats"),
+        ).pack(side="right")
 
         # ── Progress log ───────────────────────────────────────────────────────
         self._log_widget = scrolledtext.ScrolledText(
@@ -269,6 +283,20 @@ class App(tk.Tk):
         ).grid(row=r, column=1, sticky="w", padx=(0, 16), pady=(0, 4))
         r += 1
 
+        ttk.Label(form, text="Search engines").grid(
+            row=r, column=0, sticky="w", padx=(16, 8), pady=(4, 2)
+        )
+        eng_row = ttk.Frame(form)
+        eng_row.grid(row=r, column=1, columnspan=2, sticky="w", padx=(0, 16), pady=(4, 2))
+        self._engine_google = tk.BooleanVar(value=True)
+        self._engine_bing   = tk.BooleanVar(value=False)
+        self._engine_yandex = tk.BooleanVar(value=False)
+        ttk.Checkbutton(eng_row, text="Google Lens", variable=self._engine_google).pack(side="left", padx=(0, 10))
+        ttk.Checkbutton(eng_row, text="Bing",        variable=self._engine_bing).pack(side="left", padx=(0, 10))
+        ttk.Checkbutton(eng_row, text="Yandex",      variable=self._engine_yandex).pack(side="left")
+        ttk.Label(eng_row, text="   (URL searches only)", foreground="#999").pack(side="left")
+        r += 1
+
         ttk.Separator(form, orient="horizontal").grid(
             row=r, column=0, columnspan=3, sticky="ew", padx=16, pady=6
         )
@@ -391,7 +419,7 @@ class App(tk.Tk):
             return
 
         has_source = any(r.get("source_image") for r in results)
-        n_cols = 6 if has_source else 5
+        n_cols = 7 if has_source else 6
 
         self._rows_frame.columnconfigure(2, weight=1)
         self._rows_frame.columnconfigure(3, weight=2)
@@ -402,7 +430,10 @@ class App(tk.Tk):
         ttk.Label(self._rows_frame, text="URL",            style="ColHeader.TLabel").grid(row=0, column=3, sticky="w", padx=4)
         ttk.Label(self._rows_frame, text="Source",         style="ColHeader.TLabel").grid(row=0, column=4, sticky="w", padx=4)
         if has_source:
-            ttk.Label(self._rows_frame, text="From", style="ColHeader.TLabel").grid(row=0, column=5, sticky="w", padx=4)
+            ttk.Label(self._rows_frame, text="From",   style="ColHeader.TLabel").grid(row=0, column=5, sticky="w", padx=4)
+            ttk.Label(self._rows_frame, text="Engine", style="ColHeader.TLabel").grid(row=0, column=6, sticky="w", padx=4)
+        else:
+            ttk.Label(self._rows_frame, text="Engine", style="ColHeader.TLabel").grid(row=0, column=5, sticky="w", padx=4)
 
         ttk.Separator(self._rows_frame, orient="horizontal").grid(
             row=1, column=0, columnspan=n_cols, sticky="ew", pady=2
@@ -450,6 +481,16 @@ class App(tk.Tk):
                 f = ttk.Label(self._rows_frame, text=ft, foreground="#555", width=24)
                 f.grid(row=row, column=5, sticky="w", padx=(4, 8), pady=1)
                 f.bind("<MouseWheel>", self._on_mousewheel)
+                eng_col = 6
+            else:
+                eng_col = 5
+
+            engine = result.get("engine", "") or "—"
+            if len(engine) > 22:
+                engine = engine[:19] + "…"
+            e = ttk.Label(self._rows_frame, text=engine, foreground="#555", width=18)
+            e.grid(row=row, column=eng_col, sticky="w", padx=(4, 8), pady=1)
+            e.bind("<MouseWheel>", self._on_mousewheel)
 
         self._update_result_count()
         self._export_btn.config(state="normal")
@@ -507,13 +548,19 @@ class App(tk.Tk):
             text=f"Searching {n} image{'s' if n > 1 else ''}…"
         )
 
+        engines = [k for k, var in [
+            ("google", self._engine_google),
+            ("bing",   self._engine_bing),
+            ("yandex", self._engine_yandex),
+        ] if var.get()] or ["google"]
+
         threading.Thread(
             target=self._worker,
-            args=(url or None, files or None, api_key),
+            args=(url or None, files or None, api_key, engines),
             daemon=True,
         ).start()
 
-    def _worker(self, url, files, api_key):
+    def _worker(self, url, files, api_key, engines):
         if url:
             sources = [("url", url)]
             self._source_label = url
@@ -528,11 +575,20 @@ class App(tk.Tk):
             for i, (kind, src) in enumerate(sources, 1):
                 label  = os.path.basename(src) if kind == "file" else src
                 prefix = f"[{i}/{len(sources)}] " if multi else ""
-                self.after(0, self._log, f"{prefix}Searching: {label}")
-
-                data    = upload_and_search(src, api_key) if kind == "file" \
-                          else search_reverse_image(src, api_key)
-                results = parse_results(data)
+                if kind == "file":
+                    self.after(0, self._log, f"{prefix}Uploading: {label} (Google Lens)…")
+                    data = upload_and_search(src, api_key)
+                    err  = data.get("_request_error") or data.get("error")
+                    if err:
+                        raise RuntimeError(f"[RIS-103] Upload failed for {label}: {err}")
+                    results = parse_results(data)
+                else:
+                    _LABELS = {"google": "Google Lens", "bing": "Bing", "yandex": "Yandex"}
+                    eng_label = " · ".join(_LABELS[e] for e in engines)
+                    self.after(0, self._log, f"{prefix}Searching: {label} ({eng_label})…")
+                    results, errs = search_all_engines(src, api_key, engines=engines)
+                    for eng, err in errs.items():
+                        self.after(0, self._log, f"  [RIS-101] {eng} error: {err}")
 
                 if multi:
                     for res in results:
@@ -556,7 +612,7 @@ class App(tk.Tk):
             self.after(0, self._show_results, all_results)
 
         except Exception as e:
-            self.after(0, self._log, f"\nError: {e}")
+            self.after(0, self._log, f"\n[RIS-301] Search error: {e}")
             self.after(0, self._log, traceback.format_exc())
             self.after(0, lambda: self._result_count_label.config(text="Error — see log"))
 
@@ -588,40 +644,59 @@ class App(tk.Tk):
         self._export_btn.config(state="disabled")
         self._open_btn.config(state="disabled")
 
+        do_csv   = self._do_csv.get()
+        do_excel = self._do_excel.get()
+        do_html  = self._do_html.get()
+        source_label = self._source_label
+
         threading.Thread(
             target=self._export_worker,
-            args=(selected, outdir, prefix),
+            args=(selected, outdir, prefix, do_csv, do_excel, do_html, source_label),
             daemon=True,
         ).start()
 
-    def _export_worker(self, results, outdir, prefix):
+    def _export_worker(self, results, outdir, prefix, do_csv, do_excel, do_html, source_label):
         try:
             out_prefix = os.path.join(outdir, prefix)
+            any_ok = False
 
-            if self._do_csv.get():
-                path = f"{out_prefix}.csv"
-                export_csv(results, path)
-                self.after(0, self._log, f"CSV saved:   {path}")
+            if do_csv:
+                try:
+                    path = f"{out_prefix}.csv"
+                    export_csv(results, path)
+                    self.after(0, self._log, f"CSV saved:   {path}")
+                    any_ok = True
+                except Exception as e:
+                    self.after(0, self._log, f"[RIS-201] CSV export failed: {e}")
 
-            if self._do_excel.get():
+            if do_excel:
+                try:
+                    self.after(0, self._log,
+                               "Downloading thumbnails for Excel — this may take 30–60 s…")
+                    path = f"{out_prefix}.xlsx"
+                    export_excel(results, path)
+                    self.after(0, self._log, f"Excel saved: {path}")
+                    any_ok = True
+                except Exception as e:
+                    self.after(0, self._log, f"[RIS-202] Excel export failed: {e}")
+
+            if do_html:
+                try:
+                    path = f"{out_prefix}.html"
+                    export_html(results, path, source_label)
+                    self.after(0, self._log, f"HTML saved:  {path}")
+                    any_ok = True
+                except Exception as e:
+                    self.after(0, self._log, f"[RIS-203] HTML export failed: {e}")
+
+            if any_ok:
                 self.after(0, self._log,
-                           "Downloading thumbnails for Excel — this may take 30–60 s…")
-                path = f"{out_prefix}.xlsx"
-                export_excel(results, path)
-                self.after(0, self._log, f"Excel saved: {path}")
-
-            if self._do_html.get():
-                path = f"{out_prefix}.html"
-                export_html(results, path, self._source_label)
-                self.after(0, self._log, f"HTML saved:  {path}")
-
-            self.after(0, self._log,
-                       f"\nExported {len(results)} results. "
-                       "Click 'Open results folder' to view.")
-            self.after(0, lambda: self._open_btn.config(state="normal"))
+                           f"\nExported {len(results)} results. "
+                           "Click 'Open results folder' to view.")
+                self.after(0, lambda: self._open_btn.config(state="normal"))
 
         except Exception as e:
-            self.after(0, self._log, f"\nExport error: {e}")
+            self.after(0, self._log, f"\n[RIS-302] Unexpected export error: {e}")
             self.after(0, self._log, traceback.format_exc())
 
         finally:
