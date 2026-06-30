@@ -217,7 +217,7 @@ async def search(
         except Exception:
             pass
 
-        return {"search_id": search_id, "count": len(results), "results": results, "engine_errors": engine_errors, "search_url": search_url}
+        return {"search_id": search_id, "count": len(results), "results": results, "engine_errors": engine_errors, "search_url": search_url, "thumb_url": thumb_url}
 
     except HTTPException:
         shutil.rmtree(work_dir, ignore_errors=True)
