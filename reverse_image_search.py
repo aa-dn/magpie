@@ -142,13 +142,10 @@ def search_all_engines(image_url: str, api_key: str, engines=None, start: int = 
         futures = {}
         for key in keys:
             base_params, url_param, label = _ENGINE_CONFIGS[key]
-            if key == "google" and local_image_path and start == 0:
-                future = executor.submit(upload_and_search, local_image_path, api_key)
-            else:
-                params = {**base_params, url_param: image_url, "api_key": api_key}
-                if key == "google" and start > 0:
-                    params["start"] = start
-                future = executor.submit(_call_engine, params)
+            params = {**base_params, url_param: image_url, "api_key": api_key}
+            if key == "google" and start > 0:
+                params["start"] = start
+            future = executor.submit(_call_engine, params)
             futures[future] = label
 
         for future in as_completed(futures):
