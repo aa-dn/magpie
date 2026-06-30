@@ -210,14 +210,18 @@ async def search(
 
         source_type = "file" if is_file_upload else "url"
         thumb_url = None
+        thumb_error = None
         if is_file_upload:
-            thumb_url = upload_thumbnail(content, f"{search_id}{Path(file.filename).suffix or '.jpg'}")
+            try:
+                thumb_url = upload_thumbnail(content, f"{search_id}{Path(file.filename).suffix or '.jpg'}")
+            except Exception:
+                thumb_error = "Thumbnail could not be saved — this search won't have a preview image on the Stats page."
         try:
             record_upload(search_id, source_label, source_type, only, len(results), thumb_url)
         except Exception:
             pass
 
-        return {"search_id": search_id, "count": len(results), "results": results, "engine_errors": engine_errors, "search_url": search_url, "thumb_url": thumb_url}
+        return {"search_id": search_id, "count": len(results), "results": results, "engine_errors": engine_errors, "search_url": search_url, "thumb_error": thumb_error}
 
     except HTTPException:
         shutil.rmtree(work_dir, ignore_errors=True)
@@ -865,6 +869,15 @@ _HTML = """<!DOCTYPE html>
     .error-box.show { display: block; animation: fadeUp .25s ease; }
     .error-box h3 { color: #b91c1c; font-size: .9375rem; font-weight: 600; margin-bottom: .375rem; }
     .error-box p { color: #7f1d1d; font-size: .875rem; }
+    .warn-box {
+      display: none; background: #fffbeb; border: 1px solid #fcd34d;
+      border-radius: var(--radius); padding: 1rem 1.25rem;
+      display: flex; align-items: flex-start; gap: .75rem;
+    }
+    .warn-box.show { display: flex; animation: fadeUp .25s ease; }
+    .warn-box p { color: #92400e; font-size: .875rem; flex: 1; margin: 0; }
+    .warn-box button { background: none; border: none; cursor: pointer; font-size: 1rem;
+                       color: #92400e; padding: 0; line-height: 1; flex-shrink: 0; }
 
     /* ── Results ── */
     .results { display: none; }
@@ -1317,6 +1330,12 @@ _HTML = """<!DOCTYPE html>
     <p id="error-msg"></p>
   </div>
 
+  <!-- Thumbnail warning (non-blocking) -->
+  <div class="warn-box" id="warn-box">
+    <p id="warn-msg"></p>
+    <button onclick="document.getElementById('warn-box').classList.remove('show')" title="Dismiss">&#x2715;</button>
+  </div>
+
   <!-- Results -->
   <div class="results" id="results">
     <div class="results-header">
@@ -1760,7 +1779,7 @@ _HTML = """<!DOCTYPE html>
     }
 
     setLoading(true);
-    cls('results'); cls('error-box');
+    cls('results'); cls('error-box'); cls('warn-box');
 
     try {
       const fd = new FormData();
@@ -1789,6 +1808,10 @@ _HTML = """<!DOCTYPE html>
         data = await resp.json();
         if (!resp.ok) { showError(data.detail || 'An unexpected error occurred.'); return; }
         searchId = data.search_id; _searchUrl = data.search_url; _searchStart = 0;
+        if (data.thumb_error) {
+          document.getElementById('warn-msg').textContent = data.thumb_error;
+          document.getElementById('warn-box').classList.add('show');
+        }
         renderResults(data.results, data.count, data.engine_errors || {});
         if (data.count >= _PAGE_SIZE && getMaxPages() > 1) await autoFetchPages(_searchUrl, getMaxPages());
       }
