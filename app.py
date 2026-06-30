@@ -400,6 +400,14 @@ async def api_record_selections(request: Request):
     return {"ok": True}
 
 
+@app.post("/admin/verify-password")
+async def admin_verify_password(request: Request):
+    payload = await request.json()
+    if not ADMIN_PASSWORD or payload.get("password", "") != ADMIN_PASSWORD:
+        raise HTTPException(403, "Invalid password")
+    return {"ok": True}
+
+
 @app.post("/admin/delete-upload")
 async def admin_delete_upload(request: Request):
     payload = await request.json()
@@ -732,6 +740,7 @@ _HTML = """<!DOCTYPE html>
     .bird-loader { width: 90px; height: auto; margin: 0 auto 1rem; display: block; }
     .loading p { color: var(--gray-600); font-size: .9375rem; font-weight: 500; }
     .loading .hint { font-size: .8125rem; color: var(--gray-400); margin-top: .5rem; }
+    .loading .fact { font-size: .78rem; color: var(--gray-400); margin-top: .75rem; max-width: 420px; margin-left: auto; margin-right: auto; font-style: italic; line-height: 1.5; }
 
     /* ── Error ── */
     .error-box {
@@ -1078,6 +1087,12 @@ _HTML = """<!DOCTYPE html>
       <div class="brand-name">Image Intelligence</div>
       <div class="brand-sub">ISD · Reverse Image Search</div>
     </div>
+    <a class="bh-header-badge" href="/stats" style="text-decoration:none">
+      <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/>
+      </svg>
+      Stats
+    </a>
     <button class="bh-header-badge" id="bh-header-badge" onclick="document.getElementById(\'birdhouse-section\').scrollIntoView({behavior:\'smooth\'})">
       <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"/>
@@ -1178,6 +1193,7 @@ _HTML = """<!DOCTYPE html>
   <div class="loading" id="loading">
     <img class="bird-loader" src="/static/magpie flying gif.gif" alt="Searching…">
     <p>Searching the web&hellip;</p>
+    <div class="fact" id="loading-fact"></div>
   </div>
 
   <!-- Error -->
@@ -1352,6 +1368,19 @@ _HTML = """<!DOCTYPE html>
 </div>
 
 <script>
+  const _MAGPIE_FACTS = [
+    `Magpies are from the family Corvidae, shared by ravens, crows, jackdaws, rooks, and others.`,
+    `The "mag" in magpie is believed to be derived from the French name Margot or Margaret, used in the late 14th century for women who chattered idly.`,
+    `Magpies are the national bird of Bangladesh.`,
+    `In Ireland, it's bad luck to see a single magpie; especially if you pass it without saying "Hello Mr. Magpie"`,
+    `It's a common myth that magpies favour shiny objects over dull ones; they will collect anything!`,
+    `The magpie is the official bird of Edmonton, Canada.`,
+    `Australian magpies aren't corvids like most other magpies around the world.`,
+    `The Latin name for the Eurasian magpie is pica pica.`,
+    `Magpies in Asia are often seen in bright greens, reds and blues, or yellow.`,
+    `Magpies have shown the ability to make and use tools, imitate human speech, grieve, play games, and work in teams.`
+  ];
+
   let searchId = null;
   let activeTab = 'url';
   let chosenFile = null;
@@ -1878,7 +1907,10 @@ _HTML = """<!DOCTYPE html>
   function setLoading(on) {
     const isBulk = activeTab === 'bulk';
     document.getElementById('loading').classList.toggle('show', on);
-    if (on) document.getElementById('loading').scrollIntoView({behavior: 'smooth', block: 'center'});
+    if (on) {
+      document.getElementById('loading').scrollIntoView({behavior: 'smooth', block: 'center'});
+      document.getElementById('loading-fact').textContent = _MAGPIE_FACTS[Math.floor(Math.random() * _MAGPIE_FACTS.length)];
+    }
     document.querySelector('.loading p').textContent = isBulk ? `Searching ${bulkFiles.length} images across 3 engines…` : 'Searching the web…';
     const btn = document.getElementById(isBulk ? 'bulk-search-btn' : 'search-btn');
     if (!btn) return;
@@ -2163,15 +2195,33 @@ _HTML = """<!DOCTYPE html>
     if (open) document.getElementById('admin-pw').focus();
   }}
 
-  function unlockAdmin() {{
+  async function unlockAdmin() {{
     const pw = document.getElementById('admin-pw').value.trim();
     if (!pw) return;
+    const statusEl = document.getElementById('admin-status');
+    statusEl.textContent = 'Verifying…';
+    try {{
+      const resp = await fetch('/admin/verify-password', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify({{password: pw}})
+      }});
+      if (!resp.ok) {{
+        statusEl.textContent = 'Incorrect password.';
+        document.getElementById('admin-pw').value = '';
+        document.getElementById('admin-pw').focus();
+        return;
+      }}
+    }} catch (e) {{
+      statusEl.textContent = 'Network error — could not verify.';
+      return;
+    }}
     _adminPw = pw;
     document.querySelectorAll('.del-btn').forEach(b => b.style.display = '');
     document.getElementById('admin-form').style.display = 'none';
     document.getElementById('admin-toggle').innerHTML = '&#x1F512; Lock';
     document.getElementById('admin-toggle').onclick = lockAdmin;
-    document.getElementById('admin-status').textContent = 'Admin mode active — delete buttons visible';
+    statusEl.textContent = 'Admin mode active — delete buttons visible';
   }}
 
   function lockAdmin() {{

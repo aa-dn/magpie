@@ -16,9 +16,18 @@ import json
 import argparse
 import requests
 from io import BytesIO
+from urllib.parse import urlparse
 
 
 # ── SerpAPI ───────────────────────────────────────────────────────────────────
+
+def _domain(url: str) -> str:
+    """Extract the domain from a URL as a fallback source label."""
+    try:
+        return urlparse(url).netloc.lstrip("www.") or url
+    except Exception:
+        return url
+
 
 def _call_engine(params: dict) -> dict:
     try:
@@ -36,10 +45,14 @@ def _parse_engine_results(data: dict, engine_label: str) -> list[dict]:
         results = []
         for item in items:
             thumb = item.get("thumbnail", "")
+            url   = item.get("source") or item.get("link", "")
+            src   = item.get("domain") or ""
+            if not src:
+                src = _domain(url)
             results.append({
                 "title":     item.get("title", ""),
-                "url":       item.get("source") or item.get("link", ""),
-                "source":    item.get("domain") or item.get("source", ""),
+                "url":       url,
+                "source":    src,
                 "thumbnail": thumb if isinstance(thumb, str) else "",
                 "engine":    engine_label,
             })
@@ -56,10 +69,12 @@ def _parse_engine_results(data: dict, engine_label: str) -> list[dict]:
         thumb = item.get("thumbnail", "")
         if isinstance(thumb, dict):
             thumb = thumb.get("src", "") or thumb.get("link", "")
+        url = item.get("link") or item.get("url", "")
+        src = item.get("source", "") or _domain(url)
         results.append({
             "title":     item.get("title", ""),
-            "url":       item.get("link") or item.get("url", ""),
-            "source":    item.get("source", ""),
+            "url":       url,
+            "source":    src,
             "thumbnail": thumb or "",
             "engine":    engine_label,
         })
