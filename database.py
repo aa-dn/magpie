@@ -117,8 +117,16 @@ def get_stats() -> dict:
             total_selected = cur.fetchone()[0]
 
             cur.execute("""
+                SELECT engine, COUNT(*) AS cnt
+                FROM selected_results
+                GROUP BY engine
+                ORDER BY cnt DESC
+            """)
+            engine_counts_raw = cur.fetchall()
+
+            cur.execute("""
                 SELECT u.id, u.source_label, u.created_at, u.source_type,
-                       u.engines_used, u.total_results,
+                       u.engines_used, u.total_results, u.thumbnail_url,
                        COUNT(s.id) AS selected_count
                 FROM uploads u
                 LEFT JOIN selected_results s ON s.upload_id = u.id
@@ -129,9 +137,18 @@ def get_stats() -> dict:
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, row)) for row in cur.fetchall()]
 
+    # Flatten multi-engine labels like "Google Lens · Bing" into individual counts
+    engine_totals = {}
+    for engine_label, cnt in engine_counts_raw:
+        for part in (engine_label or "").split("·"):
+            key = part.strip()
+            if key:
+                engine_totals[key] = engine_totals.get(key, 0) + cnt
+
     return {
         "total_uploads": total_uploads,
         "total_selected": total_selected,
+        "engine_selection_counts": engine_totals,
         "rows": rows,
     }
 

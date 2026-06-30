@@ -468,6 +468,17 @@ async def stats_page():
         if total_results_found else 0
     )
 
+    engine_counts = data.get("engine_selection_counts", {})
+    total_sel = data["total_selected"] or 1
+    engine_cards_html = ""
+    for eng, cnt in engine_counts.items():
+        pct = round(cnt / total_sel * 100, 1)
+        engine_cards_html += (
+            f'<div class="card engine"><div class="label">{eng}</div>'
+            f'<div class="value">{cnt}</div>'
+            f'<div class="sub">{pct}% of selections</div></div>\n'
+        )
+
     rows_html = ""
     for r in data["rows"]:
         label    = r["source_label"] or "—"
@@ -553,6 +564,11 @@ async def stats_page():
   .del-col {{ width:44px; text-align:center; padding:.4rem .5rem !important; }}
   .del-btn {{ background:none; border:none; cursor:pointer; font-size:.95rem; padding:.25rem .4rem; border-radius:.375rem; color:#d1d5db; transition:color .15s,background .15s; }}
   .del-btn:hover {{ color:#dc2626; background:#fef2f2; }}
+  .section-heading {{ font-size:.85rem; font-weight:600; text-transform:uppercase;
+                      letter-spacing:.06em; color:#6b7280; margin-bottom:.75rem; margin-top:.25rem; }}
+  .card.engine .value {{ background: linear-gradient(90deg, #0ea5e9, #10b981);
+                         -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+                         background-clip: text; }}
 </style>
 </head>
 <body>
@@ -570,6 +586,7 @@ async def stats_page():
   <div class="card"><div class="label">Results selected</div><div class="value">{data["total_selected"]}</div><div class="sub">of {total_results_found} total found</div></div>
   <div class="card"><div class="label">Selection rate</div><div class="value">{total_pct}%</div><div class="sub">results kept on average</div></div>
 </div>
+{f'<h2 class="section-heading">Selections by engine</h2><div class="cards">{engine_cards_html}</div>' if engine_cards_html else ''}
 <div class="overflow-wrap">
 <table>
   <thead><tr>
