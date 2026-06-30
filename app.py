@@ -872,7 +872,7 @@ _HTML = """<!DOCTYPE html>
     .warn-box {
       display: none; background: #fffbeb; border: 1px solid #fcd34d;
       border-radius: var(--radius); padding: 1rem 1.25rem;
-      display: flex; align-items: flex-start; gap: .75rem;
+      align-items: flex-start; gap: .75rem;
     }
     .warn-box.show { display: flex; animation: fadeUp .25s ease; }
     .warn-box p { color: #92400e; font-size: .875rem; flex: 1; margin: 0; }
