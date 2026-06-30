@@ -29,4 +29,4 @@ def upload_thumbnail(image_bytes: bytes, filename: str) -> str | None:
     )
     if resp.status_code in (200, 201):
         return f"{supabase_url}/storage/v1/object/public/{_BUCKET}/{filename}"
-    return None
+    raise RuntimeError(f"Supabase upload failed {resp.status_code}: {resp.text[:300]}")
