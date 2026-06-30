@@ -65,18 +65,21 @@ def init_db() -> None:
                 CREATE INDEX IF NOT EXISTS idx_sel_upload
                     ON selected_results(upload_id);
             """)
+            cur.execute("""
+                ALTER TABLE uploads ADD COLUMN IF NOT EXISTS thumbnail_url TEXT;
+            """)
 
 
 def record_upload(search_id: str, source_label: str, source_type: str,
-                  engines: str, total_results: int) -> None:
+                  engines: str, total_results: int, thumbnail_url: str = None) -> None:
     with _conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO uploads
-                   (id, created_at, source_label, source_type, engines_used, total_results)
-                   VALUES (%s, %s, %s, %s, %s, %s)
+                   (id, created_at, source_label, source_type, engines_used, total_results, thumbnail_url)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)
                    ON CONFLICT (id) DO NOTHING""",
-                (search_id, _now(), source_label, source_type, engines, total_results),
+                (search_id, _now(), source_label, source_type, engines, total_results, thumbnail_url),
             )
 
 

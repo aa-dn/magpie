@@ -170,8 +170,10 @@ async def search(
             raise HTTPException(400, "Provide an image URL or upload a file")
 
         only = engines if engines in {"all", "google", "yandex", "bing"} else "all"
+        is_file_upload = bool(file and file.filename)
+        local_path = str(img_path) if is_file_upload else None
         results, engine_errors = await loop.run_in_executor(
-            _pool, functools.partial(search_all_engines, search_url, SERPAPI_KEY, only)
+            _pool, functools.partial(search_all_engines, search_url, SERPAPI_KEY, only, 0, local_path)
         )
 
         if results:
@@ -184,9 +186,10 @@ async def search(
 
             await loop.run_in_executor(_pool, _exports)
 
-        source_type = "file" if (file and file.filename) else "url"
+        source_type = "file" if is_file_upload else "url"
+        thumb_url = search_url if is_file_upload else None
         try:
-            record_upload(search_id, source_label, source_type, only, len(results))
+            record_upload(search_id, source_label, source_type, only, len(results), thumb_url)
         except Exception:
             pass
 
@@ -451,12 +454,12 @@ async def stats_page():
         selected = r["selected_count"] or 0
         pct      = round(selected / found * 100, 1) if found else 0
         pct_html = f'<span class="pct-bar"><span class="pct-fill" style="width:{min(pct,100)}%"></span></span>{pct}%'
-        is_url   = (r.get("source_type") == "url") and label.startswith("http")
+        thumb_src = r.get("thumbnail_url") or (label if label.startswith("http") else None)
         thumb    = (
-            f'<img src="{label}" alt="" '
+            f'<img src="{thumb_src}" alt="" '
             f'style="width:48px;height:36px;object-fit:cover;border-radius:.375rem;display:block;background:#e5e7eb;" '
             f'onerror="this.replaceWith(Object.assign(document.createElement(\'div\'),{{className:\'file-placeholder\',title:\'{label}\'}}))">'
-            if is_url else
+            if thumb_src else
             f'<div class="file-placeholder" title="{label}"></div>'
         )
         uid = r["id"]
@@ -552,6 +555,77 @@ async def stats_page():
   <tbody>{rows_html or '<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:2rem">No searches yet.</td></tr>'}</tbody>
 </table>
 </div>
+<script>
+  let _adminPw = null;
+  function toggleAdmin() {{
+    const f = document.getElementById('admin-form');
+    const open = f.style.display !== 'flex';
+    f.style.display = open ? 'flex' : 'none';
+    if (open) document.getElementById('admin-pw').focus();
+  }}
+  async function unlockAdmin() {{
+    const pw = document.getElementById('admin-pw').value.trim();
+    if (!pw) return;
+    const statusEl = document.getElementById('admin-status');
+    statusEl.textContent = 'Verifying…';
+    try {{
+      const resp = await fetch('/admin/verify-password', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify({{password: pw}})
+      }});
+      if (!resp.ok) {{
+        statusEl.textContent = 'Incorrect password.';
+        document.getElementById('admin-pw').value = '';
+        document.getElementById('admin-pw').focus();
+        return;
+      }}
+    }} catch (e) {{
+      statusEl.textContent = 'Network error — could not verify.';
+      return;
+    }}
+    _adminPw = pw;
+    document.querySelectorAll('.del-btn').forEach(b => b.style.display = '');
+    document.getElementById('admin-form').style.display = 'none';
+    document.getElementById('admin-toggle').innerHTML = '&#x1F512; Lock';
+    document.getElementById('admin-toggle').onclick = lockAdmin;
+    statusEl.textContent = 'Admin mode active — delete buttons visible';
+  }}
+  function lockAdmin() {{
+    _adminPw = null;
+    document.querySelectorAll('.del-btn').forEach(b => b.style.display = 'none');
+    document.getElementById('admin-toggle').innerHTML = '&#x1F513; Admin mode';
+    document.getElementById('admin-toggle').onclick = toggleAdmin;
+    document.getElementById('admin-status').textContent = '';
+  }}
+  async function deleteRow(btn, uploadId) {{
+    if (!_adminPw) return;
+    if (!confirm('Delete this entry and all its saved selections? This cannot be undone.')) return;
+    btn.disabled = true;
+    try {{
+      const resp = await fetch('/admin/delete-upload', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify({{password: _adminPw, upload_id: uploadId}})
+      }});
+      if (!resp.ok) {{
+        const d = await resp.json().catch(() => ({{}}));
+        if (resp.status === 403) {{
+          alert('Incorrect password — admin mode locked.');
+          lockAdmin();
+        }} else {{
+          alert('[RIS-501] Delete failed: ' + (d.detail || 'unknown error'));
+          btn.disabled = false;
+        }}
+        return;
+      }}
+      btn.closest('tr').remove();
+    }} catch (e) {{
+      alert('Network error — could not delete: ' + e.message);
+      btn.disabled = false;
+    }}
+  }}
+</script>
 </body>
 </html>"""
 
@@ -1087,7 +1161,7 @@ _HTML = """<!DOCTYPE html>
       <div class="brand-name">Image Intelligence</div>
       <div class="brand-sub">ISD · Reverse Image Search</div>
     </div>
-    <a class="bh-header-badge" href="/stats" style="text-decoration:none">
+    <a class="bh-header-badge visible" href="/stats" style="text-decoration:none">
       <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"/>
       </svg>

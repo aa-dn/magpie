@@ -39,8 +39,8 @@ def _call_engine(params: dict) -> dict:
 
 
 def _parse_engine_results(data: dict, engine_label: str) -> list[dict]:
-    # Bing reverse image returns results across two keys; use `source` as the page URL
-    if "pages_with_this_image" in data or "related_content" in data:
+    if engine_label == "Bing":
+        # Bing returns results across two keys; use `source` as the page URL
         items = list(data.get("pages_with_this_image", [])) + list(data.get("related_content", []))
         results = []
         for item in items:
@@ -58,6 +58,7 @@ def _parse_engine_results(data: dict, engine_label: str) -> list[dict]:
             })
         return results
 
+    # Google Lens and Yandex
     items = (
         data.get("visual_matches") or
         data.get("image_results") or
@@ -66,10 +67,14 @@ def _parse_engine_results(data: dict, engine_label: str) -> list[dict]:
     )
     results = []
     for item in items:
-        thumb = item.get("thumbnail", "")
-        if isinstance(thumb, dict):
-            thumb = thumb.get("src", "") or thumb.get("link", "")
-        url = item.get("link") or item.get("url", "")
+        raw_thumb = item.get("thumbnail", "")
+        if isinstance(raw_thumb, dict):
+            thumb = raw_thumb.get("src", "") or raw_thumb.get("link", "")
+            thumb_original = raw_thumb.get("original", "")
+        else:
+            thumb = raw_thumb or ""
+            thumb_original = ""
+        url = item.get("link") or item.get("url", "") or thumb_original
         src = item.get("source", "") or _domain(url)
         results.append({
             "title":     item.get("title", ""),
@@ -116,8 +121,10 @@ def _canon_url(url: str) -> str:
     return u.lower()
 
 
-def search_all_engines(image_url: str, api_key: str, engines: list = None, start: int = 0) -> tuple[list[dict], dict[str, str]]:
-    """Returns (results, engine_errors). engines: list of 'google'/'bing'/'yandex', or None/\"all\" for all."""
+def search_all_engines(image_url: str, api_key: str, engines=None, start: int = 0, local_image_path: str = None) -> tuple[list[dict], dict[str, str]]:
+    """Returns (results, engine_errors). engines: list of 'google'/'bing'/'yandex', or None/\"all\" for all.
+    local_image_path: when provided, Google Lens uploads the file directly to SerpAPI instead of
+    passing the hosted URL (avoids 'no results' errors on ephemeral/private URLs)."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     # Accept a string ("all", "google", "bing", "yandex") for backward compatibility
@@ -128,19 +135,22 @@ def search_all_engines(image_url: str, api_key: str, engines: list = None, start
     if not keys:
         keys = list(_ENGINE_CONFIGS.keys())
 
-    engine_tasks = []
-    for key in keys:
-        base_params, url_param, label = _ENGINE_CONFIGS[key]
-        params = {**base_params, url_param: image_url, "api_key": api_key}
-        if key == "google" and start > 0:
-            params["start"] = start
-        engine_tasks.append((params, label))
-
     by_url = {}
     engine_errors = {}
 
     with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = {executor.submit(_call_engine, params): label for params, label in engine_tasks}
+        futures = {}
+        for key in keys:
+            base_params, url_param, label = _ENGINE_CONFIGS[key]
+            if key == "google" and local_image_path and start == 0:
+                future = executor.submit(upload_and_search, local_image_path, api_key)
+            else:
+                params = {**base_params, url_param: image_url, "api_key": api_key}
+                if key == "google" and start > 0:
+                    params["start"] = start
+                future = executor.submit(_call_engine, params)
+            futures[future] = label
+
         for future in as_completed(futures):
             label = futures[future]
             data = future.result()
@@ -152,14 +162,14 @@ def search_all_engines(image_url: str, api_key: str, engines: list = None, start
                 for r in _parse_engine_results(data, label):
                     if not r["url"]:
                         continue
-                    key = _canon_url(r["url"])
-                    if key in by_url:
-                        existing = by_url[key]
+                    canon = _canon_url(r["url"])
+                    if canon in by_url:
+                        existing = by_url[canon]
                         existing_labels = [e.strip() for e in existing["engine"].split("·")]
                         if label not in existing_labels:
                             existing["engine"] += f" · {label}"
                     else:
-                        by_url[key] = r
+                        by_url[canon] = r
 
     return list(by_url.values()), engine_errors
 
