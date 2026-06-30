@@ -96,7 +96,7 @@ def upload_and_search(image_path: str, api_key: str) -> dict:
         with open(image_path, "rb") as img_file:
             resp = requests.post(
                 "https://serpapi.com/search",
-                data={"engine": "google_lens", "api_key": api_key},
+                params={"engine": "google_lens", "api_key": api_key},
                 files={"image_file": (os.path.basename(image_path), img_file)},
                 timeout=60,
             )
