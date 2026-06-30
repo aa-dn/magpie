@@ -28,6 +28,7 @@ from reverse_image_search import (
     search_all_engines,
 )
 from database import init_db, record_upload, record_selections, get_stats, delete_upload
+from storage import upload_thumbnail
 
 # ══════════════════════════════════════════════════════════════════════════════
 # BRANDING — edit these values to customise the tool's appearance
@@ -122,6 +123,28 @@ async def debug_raw_search(url: str, engine: str = "all"):
     return out
 
 
+@app.post("/debug/upload-search")
+async def debug_upload_search(file: UploadFile = File(...)):
+    """Upload a file and return the raw Google Lens SerpAPI response.
+    Use multipart POST, e.g.: curl -F file=@image.jpg http://localhost:8000/debug/upload-search
+    """
+    from reverse_image_search import upload_and_search
+    if not SERPAPI_KEY:
+        return {"error": "SERPAPI_KEY not set"}
+    content = await file.read()
+    suffix = Path(file.filename).suffix or ".jpg"
+    tmp = TEMP_DIR / f"debug_upload{suffix}"
+    tmp.write_bytes(content)
+    data = upload_and_search(str(tmp), SERPAPI_KEY)
+    return {
+        "top_level_keys": list(data.keys()),
+        "error": data.get("error"),
+        "_request_error": data.get("_request_error"),
+        "result_counts": {k: len(v) for k, v in data.items() if isinstance(v, list)},
+        "first_result": next((v[0] for v in data.values() if isinstance(v, list) and v), None),
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index():
     return _HTML
@@ -171,9 +194,8 @@ async def search(
 
         only = engines if engines in {"all", "google", "yandex", "bing"} else "all"
         is_file_upload = bool(file and file.filename)
-        local_path = str(img_path) if is_file_upload else None
         results, engine_errors = await loop.run_in_executor(
-            _pool, functools.partial(search_all_engines, search_url, SERPAPI_KEY, only, 0, local_path)
+            _pool, functools.partial(search_all_engines, search_url, SERPAPI_KEY, only, 0)
         )
 
         if results:
@@ -187,7 +209,9 @@ async def search(
             await loop.run_in_executor(_pool, _exports)
 
         source_type = "file" if is_file_upload else "url"
-        thumb_url = search_url if is_file_upload else None
+        thumb_url = None
+        if is_file_upload:
+            thumb_url = upload_thumbnail(content, f"{search_id}{Path(file.filename).suffix or '.jpg'}")
         try:
             record_upload(search_id, source_label, source_type, only, len(results), thumb_url)
         except Exception:
@@ -1471,9 +1495,16 @@ _HTML = """<!DOCTYPE html>
   let _socialFilter = false;
   let _engineFilter = 'all';
   const _SOCIAL_DOMAINS = [
+    // Major social networks
     'instagram','facebook','twitter','x.com','tiktok','reddit','youtube',
     'linkedin','pinterest','tumblr','snapchat','vk.com','weibo','flickr',
-    'imgur','telegram','twitch','whatsapp','discord','threads','bluesky','mastodon'
+    'imgur','twitch','threads','bluesky','mastodon','ok.ru','lemon8',
+    // Messaging apps
+    'telegram','whatsapp','discord','signal.org','viber.com','line.me',
+    'wechat.com','kakao.com','kik.com','wire.com','wickr',
+    // Alt-right / fringe platforms (relevant for disinformation research)
+    'gab.com','parler.com','truthsocial.com','gettr.com','rumble.com',
+    'bitchute.com','odysee.com','mewe.com','minds.com','4chan.org','8kun',
   ];
 
   // ── Tab switching ──────────────────────────────────────────────────────────
