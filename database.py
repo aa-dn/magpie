@@ -97,6 +97,13 @@ def record_selections(upload_id: str, results: list, action: str = "export") -> 
             )
 
 
+def delete_upload(upload_id: str) -> None:
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM selected_results WHERE upload_id = %s", (upload_id,))
+            cur.execute("DELETE FROM uploads WHERE id = %s", (upload_id,))
+
+
 def get_stats() -> dict:
     with _conn() as conn:
         with conn.cursor() as cur:

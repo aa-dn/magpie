@@ -70,6 +70,22 @@ def search_reverse_image(image_url: str, api_key: str) -> dict:
     return _call_engine({"engine": "google_lens", "url": image_url, "api_key": api_key})
 
 
+def upload_and_search(image_path: str, api_key: str) -> dict:
+    """Upload a local image file to SerpAPI Google Lens and return the raw response."""
+    try:
+        with open(image_path, "rb") as img_file:
+            resp = requests.post(
+                "https://serpapi.com/search",
+                data={"engine": "google_lens", "api_key": api_key},
+                files={"image_file": (os.path.basename(image_path), img_file)},
+                timeout=60,
+            )
+            resp.raise_for_status()
+            return resp.json()
+    except Exception as e:
+        return {"_request_error": str(e)}
+
+
 _ENGINE_CONFIGS = {
     "google": ({"engine": "google_lens"},        "url",       "Google Lens"),
     "yandex": ({"engine": "yandex_images"},      "url",       "Yandex"),
@@ -77,24 +93,31 @@ _ENGINE_CONFIGS = {
 }
 
 
-def search_all_engines(image_url: str, api_key: str, only: str = "all", start: int = 0) -> tuple[list[dict], dict[str, str]]:
-    """Returns (results, engine_errors). only: 'all' | 'google' | 'bing' | 'yandex'."""
+def search_all_engines(image_url: str, api_key: str, engines: list = None, start: int = 0) -> tuple[list[dict], dict[str, str]]:
+    """Returns (results, engine_errors). engines: list of 'google'/'bing'/'yandex', or None/\"all\" for all."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    keys = list(_ENGINE_CONFIGS.keys()) if only == "all" else [only]
-    engines = []
+    # Accept a string ("all", "google", "bing", "yandex") for backward compatibility
+    if isinstance(engines, str):
+        engines = list(_ENGINE_CONFIGS.keys()) if engines == "all" else [engines]
+
+    keys = [k for k in (engines or _ENGINE_CONFIGS.keys()) if k in _ENGINE_CONFIGS]
+    if not keys:
+        keys = list(_ENGINE_CONFIGS.keys())
+
+    engine_tasks = []
     for key in keys:
         base_params, url_param, label = _ENGINE_CONFIGS[key]
         params = {**base_params, url_param: image_url, "api_key": api_key}
         if key == "google" and start > 0:
             params["start"] = start
-        engines.append((params, label))
+        engine_tasks.append((params, label))
 
     by_url = {}
     engine_errors = {}
 
     with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = {executor.submit(_call_engine, params): label for params, label in engines}
+        futures = {executor.submit(_call_engine, params): label for params, label in engine_tasks}
         for future in as_completed(futures):
             label = futures[future]
             data = future.result()

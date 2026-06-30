@@ -27,7 +27,7 @@ from reverse_image_search import (
     export_html,
     search_all_engines,
 )
-from database import init_db, record_upload, record_selections, get_stats
+from database import init_db, record_upload, record_selections, get_stats, delete_upload
 
 # ══════════════════════════════════════════════════════════════════════════════
 # BRANDING — edit these values to customise the tool's appearance
@@ -58,7 +58,8 @@ FONT_URL  = "https://fonts.googleapis.com/css2?family=Tirra:wght@400;500;600;700
 
 # ══════════════════════════════════════════════════════════════════════════════
 
-SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
+SERPAPI_KEY   = os.environ.get("SERPAPI_KEY", "")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 TEMP_DIR = Path(tempfile.gettempdir()) / "ris_cache"
 TEMP_DIR.mkdir(exist_ok=True)
 
@@ -355,7 +356,13 @@ async def download_combined(fmt: str, ids: str):
             continue
         json_path = TEMP_DIR / sid / "results.json"
         if json_path.exists():
-            all_results.extend(json.loads(json_path.read_text()))
+            raw = json.loads(json_path.read_text())
+            # Single-search files are saved as {"results": [...], "source_label": "..."}
+            # Bulk-search files are saved as plain lists
+            if isinstance(raw, dict):
+                all_results.extend(raw.get("results", []))
+            else:
+                all_results.extend(raw)
 
     if not all_results:
         raise HTTPException(404, "No results found — please run a new search")
@@ -386,13 +393,39 @@ async def api_record_selections(request: Request):
     results   = payload.get("results", [])
     action    = payload.get("action", "export")
     if upload_id and results:
-        record_selections(upload_id, results, action)
+        try:
+            record_selections(upload_id, results, action)
+        except Exception:
+            pass
+    return {"ok": True}
+
+
+@app.post("/admin/delete-upload")
+async def admin_delete_upload(request: Request):
+    payload = await request.json()
+    if not ADMIN_PASSWORD or payload.get("password", "") != ADMIN_PASSWORD:
+        raise HTTPException(403, "Invalid password")
+    upload_id = payload.get("upload_id", "").strip()
+    if not upload_id:
+        raise HTTPException(400, "upload_id required")
+    try:
+        delete_upload(upload_id)
+    except Exception as e:
+        raise HTTPException(500, f"[RIS-501] Delete failed: {e}")
     return {"ok": True}
 
 
 @app.get("/stats", response_class=HTMLResponse)
 async def stats_page():
-    data = get_stats()
+    try:
+        data = get_stats()
+    except Exception as e:
+        return HTMLResponse(
+            f'<html><body style="font-family:sans-serif;padding:2rem">'
+            f'<h1>Stats unavailable</h1><p>Database error: {e}</p>'
+            f'<p><a href="/">← back to app</a></p></body></html>',
+            status_code=503,
+        )
 
     total_results_found = sum(r["total_results"] or 0 for r in data["rows"])
     total_pct = (
@@ -418,6 +451,7 @@ async def stats_page():
             if is_url else
             f'<div class="file-placeholder" title="{label}"></div>'
         )
+        uid = r["id"]
         rows_html += f"""<tr>
             <td class="thumb-col">{thumb}</td>
             <td title="{label}">{short}</td>
@@ -426,6 +460,7 @@ async def stats_page():
             <td class="num">{found}</td>
             <td class="num hl">{selected}</td>
             <td class="num pct-cell">{pct_html}</td>
+            <td class="del-col"><button class="del-btn" style="display:none" onclick="deleteRow(this,'{uid}')" title="Delete this entry">&#x1F5D1;</button></td>
         </tr>\n"""
 
     return f"""<!DOCTYPE html>
@@ -473,10 +508,28 @@ async def stats_page():
                        font-weight: 600; letter-spacing: .03em; }}
   .file-placeholder::after {{ content: 'FILE'; }}
   .overflow-wrap {{ overflow-x: auto; }}
+  .admin-bar {{ display:flex; align-items:center; gap:.75rem; margin-bottom:1.5rem; flex-wrap:wrap; }}
+  .admin-toggle {{ font-size:.8rem; padding:.35rem .85rem; border:1px solid #e5e7eb; border-radius:.5rem; background:#fff; cursor:pointer; font-weight:500; color:#374151; }}
+  .admin-toggle:hover {{ background:#f3f4f6; }}
+  .admin-form {{ display:none; align-items:center; gap:.5rem; }}
+  .admin-form input {{ font-size:.8rem; padding:.35rem .6rem; border:1px solid #d1d5db; border-radius:.5rem; outline:none; }}
+  .admin-form button {{ font-size:.8rem; padding:.35rem .75rem; background:#6d28d9; color:#fff; border:none; border-radius:.5rem; cursor:pointer; }}
+  .admin-status {{ font-size:.75rem; color:#dc2626; font-weight:600; }}
+  .del-col {{ width:44px; text-align:center; padding:.4rem .5rem !important; }}
+  .del-btn {{ background:none; border:none; cursor:pointer; font-size:.95rem; padding:.25rem .4rem; border-radius:.375rem; color:#d1d5db; transition:color .15s,background .15s; }}
+  .del-btn:hover {{ color:#dc2626; background:#fef2f2; }}
 </style>
 </head>
 <body>
 <h1>Magpie — Usage Stats <a href="/">← back to app</a></h1>
+<div class="admin-bar">
+  <button class="admin-toggle" id="admin-toggle" onclick="toggleAdmin()">&#x1F513; Admin mode</button>
+  <div class="admin-form" id="admin-form">
+    <input type="password" id="admin-pw" placeholder="Password" onkeydown="if(event.key==='Enter')unlockAdmin()">
+    <button onclick="unlockAdmin()">Unlock</button>
+  </div>
+  <span class="admin-status" id="admin-status"></span>
+</div>
 <div class="cards">
   <div class="card"><div class="label">Images uploaded</div><div class="value">{data["total_uploads"]}</div></div>
   <div class="card"><div class="label">Results selected</div><div class="value">{data["total_selected"]}</div><div class="sub">of {total_results_found} total found</div></div>
@@ -486,9 +539,9 @@ async def stats_page():
 <table>
   <thead><tr>
     <th></th><th>Source image</th><th>Engines</th><th>Uploaded</th>
-    <th class="num">Results found</th><th class="num">Selected</th><th class="num">% selected</th>
+    <th class="num">Results found</th><th class="num">Selected</th><th class="num">% selected</th><th class="del-col"></th>
   </tr></thead>
-  <tbody>{rows_html or '<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:2rem">No searches yet.</td></tr>'}</tbody>
+  <tbody>{rows_html or '<tr><td colspan="8" style="text-align:center;color:#9ca3af;padding:2rem">No searches yet.</td></tr>'}</tbody>
 </table>
 </div>
 </body>
@@ -1483,7 +1536,9 @@ _HTML = """<!DOCTYPE html>
       container.appendChild(section);
 
       const tbody = document.getElementById(`bulk-tbody-${sIdx}`);
-      if (!s.results || !s.results.length) {
+      if (s.error) {
+        tbody.innerHTML = `<tr><td colspan="6"><div class="empty" style="padding:2rem"><p style="color:#dc2626">[RIS-401] Search failed: ${h(s.error)}</p></div></td></tr>`;
+      } else if (!s.results || !s.results.length) {
         tbody.innerHTML = `<tr><td colspan="6"><div class="empty" style="padding:2rem"><p>No results found.</p></div></td></tr>`;
       } else {
         s.results.forEach((r, i) => {
@@ -1665,7 +1720,10 @@ _HTML = """<!DOCTYPE html>
         fresh.forEach((r, i) => tbody.appendChild(makeResultRow(r, startIdx + i)));
         applyFilter();
         checkLoadMore(data.count);
-      } catch { break; }
+      } catch (e) {
+        showError('Could not load additional pages — ' + (e.message || 'network error') + '. Partial results shown above.');
+        break;
+      }
     }
     refreshCredits();
   }
@@ -2070,6 +2128,63 @@ _HTML = """<!DOCTYPE html>
     document.querySelector('.card').scrollIntoView({behavior: 'smooth', block: 'start'});
   }
 
+</script>
+<script>
+  let _adminPw = null;
+
+  function toggleAdmin() {{
+    const f = document.getElementById('admin-form');
+    const open = f.style.display !== 'flex';
+    f.style.display = open ? 'flex' : 'none';
+    if (open) document.getElementById('admin-pw').focus();
+  }}
+
+  function unlockAdmin() {{
+    const pw = document.getElementById('admin-pw').value.trim();
+    if (!pw) return;
+    _adminPw = pw;
+    document.querySelectorAll('.del-btn').forEach(b => b.style.display = '');
+    document.getElementById('admin-form').style.display = 'none';
+    document.getElementById('admin-toggle').innerHTML = '&#x1F512; Lock';
+    document.getElementById('admin-toggle').onclick = lockAdmin;
+    document.getElementById('admin-status').textContent = 'Admin mode active — delete buttons visible';
+  }}
+
+  function lockAdmin() {{
+    _adminPw = null;
+    document.querySelectorAll('.del-btn').forEach(b => b.style.display = 'none');
+    document.getElementById('admin-toggle').innerHTML = '&#x1F513; Admin mode';
+    document.getElementById('admin-toggle').onclick = toggleAdmin;
+    document.getElementById('admin-status').textContent = '';
+  }}
+
+  async function deleteRow(btn, uploadId) {{
+    if (!_adminPw) return;
+    if (!confirm('Delete this entry and all its saved selections? This cannot be undone.')) return;
+    btn.disabled = true;
+    try {{
+      const resp = await fetch('/admin/delete-upload', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify({{password: _adminPw, upload_id: uploadId}})
+      }});
+      if (!resp.ok) {{
+        const d = await resp.json().catch(() => ({{}}));
+        if (resp.status === 403) {{
+          alert('Incorrect password — admin mode locked.');
+          lockAdmin();
+        }} else {{
+          alert('[RIS-501] Delete failed: ' + (d.detail || 'unknown error'));
+          btn.disabled = false;
+        }}
+        return;
+      }}
+      btn.closest('tr').remove();
+    }} catch (e) {{
+      alert('Network error — could not delete: ' + e.message);
+      btn.disabled = false;
+    }}
+  }}
 </script>
 </body>
 </html>"""
