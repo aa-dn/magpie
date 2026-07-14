@@ -932,7 +932,7 @@ _HTML = """<!DOCTYPE html>
     .count-pill input:checked + span { background: rgba(255,255,255,.2); border-color: rgba(255,255,255,.75); color: #fff; }
     .count-pill input:checked + span em { opacity: 1; }
     .credit-note { font-size: .72rem; color: rgba(255,255,255,.5); text-align: center; }
-    #results-tbody tr.filtered-out { display: none; }
+    #results-tbody tr.filtered-out, [id^="bulk-tbody-"] tr.filtered-out { display: none; }
     .filter-toggle {
       font-size: .78rem; padding: 3px 10px; border-radius: 6px;
       border: 1px solid var(--gray-200); background: #fff; cursor: pointer;
@@ -1530,6 +1530,7 @@ _HTML = """<!DOCTYPE html>
   let _maxPages = 1;
   let _socialFilter = false;
   let _engineFilter = 'all';
+  let _bulkSocialFilter = {};
   const _SOCIAL_DOMAINS = [
     // Major social networks
     'instagram','facebook','twitter','x.com','tiktok','reddit','youtube',
@@ -1663,6 +1664,7 @@ _HTML = """<!DOCTYPE html>
 
   function renderBulkResults(searches) {
     bulkSearchIds = searches.map(s => s.search_id);
+    _bulkSocialFilter = {};
     const totalResults = searches.reduce((sum, s) => sum + s.count, 0);
     document.getElementById('bulk-image-count').textContent = searches.length;
     document.getElementById('bulk-total-count').textContent = totalResults;
@@ -1695,6 +1697,10 @@ _HTML = """<!DOCTYPE html>
             <button class="sel-btn" onclick="toggleAllBulk(${sIdx},true)">Select all</button>
             <button class="sel-btn" onclick="toggleAllBulk(${sIdx},false)">Select none</button>
             <span class="sel-count" id="bulk-sel-count-${sIdx}"></span>
+            <button class="filter-toggle" id="social-filter-btn-${sIdx}" onclick="toggleSocialFilterBulk(${sIdx})">
+              <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 01-.659 1.591l-5.432 5.432a2.25 2.25 0 00-.659 1.591v2.927a2.25 2.25 0 01-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 00-.659-1.591L3.659 7.409A2.25 2.25 0 013 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0112 3z"/></svg>
+              Social media only
+            </button>
             <button class="sel-export" onclick="exportSelected('bulk-${sIdx}','csv')">↓ CSV</button>
             <button class="sel-export" onclick="exportSelected('bulk-${sIdx}','xlsx')">↓ Excel</button>
             <button class="sel-export" onclick="exportSelected('bulk-${sIdx}','html')">↓ HTML</button>
@@ -1742,7 +1748,7 @@ _HTML = """<!DOCTYPE html>
           tbody.appendChild(row);
         });
       }
-      updateBulkCount(sIdx);
+      applyBulkFilter(sIdx);
     });
 
     document.getElementById('bulk-results').classList.add('show');
@@ -1962,13 +1968,13 @@ _HTML = """<!DOCTYPE html>
   }
 
   function toggleAllBulk(sIdx, checked) {
-    document.querySelectorAll(`#bulk-tbody-${sIdx} .result-cb`).forEach(cb => cb.checked = checked);
+    document.querySelectorAll(`#bulk-tbody-${sIdx} tr[data-idx]:not(.filtered-out) .result-cb`).forEach(cb => cb.checked = checked);
     updateBulkCount(sIdx);
   }
 
   function updateBulkCount(sIdx) {
-    const all = document.querySelectorAll(`#bulk-tbody-${sIdx} .result-cb`);
-    const on  = document.querySelectorAll(`#bulk-tbody-${sIdx} .result-cb:checked`);
+    const all = document.querySelectorAll(`#bulk-tbody-${sIdx} tr[data-idx]:not(.filtered-out) .result-cb`);
+    const on  = document.querySelectorAll(`#bulk-tbody-${sIdx} tr[data-idx]:not(.filtered-out) .result-cb:checked`);
     const el  = document.getElementById(`bulk-sel-count-${sIdx}`);
     if (el) el.textContent = `${on.length} of ${all.length} selected`;
     updateOpenTabsBtn();
@@ -1986,7 +1992,7 @@ _HTML = """<!DOCTYPE html>
     } else {
       const sIdx = parseInt(scope.replace('bulk-', ''));
       uploadId = bulkSearchIds[sIdx] || null;
-      document.querySelectorAll(`#bulk-tbody-${sIdx} tr[data-idx]`).forEach(row => {
+      document.querySelectorAll(`#bulk-tbody-${sIdx} tr[data-idx]:not(.filtered-out)`).forEach(row => {
         if (row.querySelector('.result-cb')?.checked)
           results.push(_bulkSections[sIdx][parseInt(row.dataset.idx)]);
       });
@@ -2016,7 +2022,7 @@ _HTML = """<!DOCTYPE html>
   function updateOpenTabsBtn() {
     let count = 0;
     document.querySelectorAll('#results-tbody tr[data-idx]:not(.filtered-out) .result-cb:checked').forEach(() => count++);
-    document.querySelectorAll('[id^="bulk-tbody-"] tr[data-idx] .result-cb:checked').forEach(() => count++);
+    document.querySelectorAll('[id^="bulk-tbody-"] tr[data-idx]:not(.filtered-out) .result-cb:checked').forEach(() => count++);
     const btn = document.getElementById('open-tabs-btn');
     if (!btn) return;
     document.getElementById('otb-count').textContent = count;
@@ -2033,7 +2039,7 @@ _HTML = """<!DOCTYPE html>
     });
     document.querySelectorAll('[id^="bulk-tbody-"]').forEach(tbody => {
       const sIdx = parseInt(tbody.id.replace('bulk-tbody-', ''));
-      tbody.querySelectorAll('tr[data-idx]').forEach(row => {
+      tbody.querySelectorAll('tr[data-idx]:not(.filtered-out)').forEach(row => {
         if (row.querySelector('.result-cb')?.checked) {
           const r = _bulkSections[sIdx]?.[parseInt(row.dataset.idx)];
           if (r?.url) urls.push(r.url);
@@ -2122,6 +2128,22 @@ _HTML = """<!DOCTYPE html>
     applyFilter();
   }
 
+  function applyBulkFilter(sIdx) {
+    const on = !!_bulkSocialFilter[sIdx];
+    document.querySelectorAll(`#bulk-tbody-${sIdx} tr[data-idx]`).forEach(row => {
+      const r = _bulkSections[sIdx]?.[parseInt(row.dataset.idx)];
+      row.classList.toggle('filtered-out', on && !(r && isSocial(r)));
+    });
+    updateBulkCount(sIdx);
+  }
+
+  function toggleSocialFilterBulk(sIdx) {
+    _bulkSocialFilter[sIdx] = !_bulkSocialFilter[sIdx];
+    const btn = document.getElementById(`social-filter-btn-${sIdx}`);
+    if (btn) btn.classList.toggle('active', _bulkSocialFilter[sIdx]);
+    applyBulkFilter(sIdx);
+  }
+
   function setEngineFilter(engine) {
     _engineFilter = engine;
     document.querySelectorAll('#eng-filter-bar .filter-toggle').forEach(b =>
@@ -2161,7 +2183,7 @@ _HTML = """<!DOCTYPE html>
     } else {
       const sIdx = parseInt(scope.replace('bulk-', ''));
       uploadId = bulkSearchIds[sIdx] || null;
-      document.querySelectorAll(`#bulk-tbody-${sIdx} tr[data-idx]`).forEach(row => {
+      document.querySelectorAll(`#bulk-tbody-${sIdx} tr[data-idx]:not(.filtered-out)`).forEach(row => {
         if (row.querySelector('.result-cb')?.checked)
           results.push(Object.assign({}, (_bulkSections[sIdx] || [])[parseInt(row.dataset.idx)]));
       });
@@ -2292,6 +2314,7 @@ _HTML = """<!DOCTYPE html>
     _searchStart   = 0;
     _socialFilter  = false;
     _engineFilter  = 'all';
+    _bulkSocialFilter = {};
     _maxPages      = getMaxPages();
     const sfb = document.getElementById('social-filter-btn');
     if (sfb) sfb.classList.remove('active');
