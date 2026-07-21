@@ -8,6 +8,7 @@ Set SERPAPI_KEY as an environment variable, then run:
 import asyncio
 import functools
 import json
+import logging
 import os
 import shutil
 import tempfile
@@ -68,6 +69,8 @@ try:
     init_db()
 except Exception as _db_err:
     print(f"WARNING: DB init failed ({_db_err}) — stats will be unavailable")
+
+logger = logging.getLogger(__name__)
 
 _pool = ThreadPoolExecutor(max_workers=4)
 app = FastAPI(title="Image Intelligence")
@@ -215,11 +218,12 @@ async def search(
             try:
                 thumb_url = upload_thumbnail(content, f"{search_id}{Path(file.filename).suffix or '.jpg'}")
             except Exception:
+                logger.exception("Thumbnail upload failed for search_id=%s", search_id)
                 thumb_error = "Thumbnail could not be saved — this search won't have a preview image on the Stats page."
         try:
             record_upload(search_id, source_label, source_type, only, len(results), thumb_url)
         except Exception:
-            pass
+            logger.exception("record_upload failed for search_id=%s", search_id)
 
         return {"search_id": search_id, "count": len(results), "results": results, "engine_errors": engine_errors, "search_url": search_url, "thumb_error": thumb_error}
 
@@ -334,13 +338,13 @@ async def bulk_search(
             scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
             host   = request.headers.get("host", request.url.netloc)
             public_url = f"{scheme}://{host}/uploads/{search_id}/{filename}"
-            targets.append((search_id, work_dir, public_url, file.filename))
+            targets.append((search_id, work_dir, public_url, file.filename, content))
 
     for url in [u.strip() for u in urls.splitlines() if u.strip()][:max(0, 5 - len(targets))]:
         search_id = str(uuid.uuid4())
         work_dir = TEMP_DIR / search_id
         work_dir.mkdir()
-        targets.append((search_id, work_dir, url, url))
+        targets.append((search_id, work_dir, url, url, None))
 
     if not targets:
         raise HTTPException(400, "Provide at least one image or URL")
@@ -348,7 +352,7 @@ async def bulk_search(
     only = engines if engines in {"all", "google", "yandex", "bing"} else "all"
     loop = asyncio.get_event_loop()
 
-    async def _search_one(search_id, work_dir, search_url, source_label):
+    async def _search_one(search_id, work_dir, search_url, source_label, content):
         try:
             results, engine_errors = await loop.run_in_executor(
                 _pool, functools.partial(search_all_engines, search_url, SERPAPI_KEY, only)
@@ -363,10 +367,16 @@ async def bulk_search(
                 await loop.run_in_executor(_pool, _exports)
             (work_dir / "results.json").write_text(json.dumps(results))
             src_type = "url" if source_label.startswith("http") else "file"
+            thumb_url = None
+            if content is not None:
+                try:
+                    thumb_url = upload_thumbnail(content, f"{search_id}{Path(source_label).suffix or '.jpg'}")
+                except Exception:
+                    logger.exception("Thumbnail upload failed for search_id=%s", search_id)
             try:
-                record_upload(search_id, source_label, src_type, only, len(results))
+                record_upload(search_id, source_label, src_type, only, len(results), thumb_url)
             except Exception:
-                pass
+                logger.exception("record_upload failed for search_id=%s", search_id)
             return {"search_id": search_id, "source_label": source_label, "count": len(results), "results": results, "engine_errors": engine_errors}
         except Exception as e:
             return {"search_id": search_id, "source_label": source_label, "count": 0, "results": [], "error": str(e)}
